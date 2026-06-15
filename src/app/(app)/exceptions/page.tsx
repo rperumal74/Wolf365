@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
+import { runReconciliationAction } from "./actions";
 
 const SEVERITY_STYLES: Record<string, string> = {
   error: "text-danger",
@@ -28,14 +29,23 @@ export default async function ExceptionsPage() {
         title="Exceptions"
         description="Unmapped clients/SKUs, missing prices, discrepancies, and connector failures."
         actions={
-          can(user.role, "reports:export") && exceptions.length > 0 ? (
-            <a
-              href="/api/export?type=exceptions"
-              className="rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
-            >
-              Export CSV
-            </a>
-          ) : null
+          <div className="flex items-center gap-2">
+            {can(user.role, "mappings:propose") && (
+              <form action={runReconciliationAction}>
+                <button className="rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent">
+                  Run reconciliation
+                </button>
+              </form>
+            )}
+            {can(user.role, "reports:export") && exceptions.length > 0 && (
+              <a
+                href="/api/export?type=exceptions"
+                className="rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+              >
+                Export CSV
+              </a>
+            )}
+          </div>
         }
       />
       <div className="p-8">

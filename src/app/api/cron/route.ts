@@ -50,7 +50,21 @@ export async function GET(request: Request) {
     }
   }
 
+  // Refresh discrepancy exceptions after syncs (best-effort).
+  let reconciled: { scanned: number; flagged: number } | { error: string };
+  try {
+    const { reconcileAllClients } = await import("@/lib/reconciliation/service");
+    reconciled = await reconcileAllClients({ id: null, email: "cron" });
+  } catch (err) {
+    reconciled = { error: safeErrorMessage(err) };
+  }
+
   const purged = await purgeOldDebugLogs(env.WOLF365_DEBUG_LOG_RETENTION_DAYS);
 
-  return NextResponse.json({ ok: true, synced: results, debugLogsPurged: purged });
+  return NextResponse.json({
+    ok: true,
+    synced: results,
+    reconciled,
+    debugLogsPurged: purged,
+  });
 }

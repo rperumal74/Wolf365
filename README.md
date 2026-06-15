@@ -7,10 +7,14 @@ Stellr** and customer/product/accounting data from **QuickBooks Online**, lets
 accounting users review and modify pending billing (prorations, discounts,
 adjustments), then pushes approved invoices back to QuickBooks Online.
 
-> **Status: foundation.** This repository currently contains a complete,
-> non-faked foundation. The connector framework performs **real** API calls,
-> nothing is stubbed, and unverified API details fail visibly rather than
-> pretending to work. See [Implemented vs. pending](#implemented-vs-pending).
+> **Status: feature-complete, deployment-ready.** End-to-end flows are
+> implemented — connector configure/test/sync, QBO OAuth + invoice push,
+> AI-assisted client/SKU mapping, discrepancy detection, billing-run generation
+> with proration, the pre-push report, and reconciliation reports with CSV
+> export. Connectors perform **real** API calls; where a live API's exact
+> response schema isn't publicly verifiable (TD SYNNEX Stellr), field mapping is
+> defensive across common envelopes and unverified endpoints fail visibly rather
+> than being faked. See [Feature status](#feature-status).
 
 ## Tech stack
 
@@ -121,31 +125,58 @@ recorded in the audit + debug logs.
 > they are absent. Wiring the exact Stellr customer/subscription response field
 > mapping is the next step once those verified paths are provided.
 
-## Implemented vs. pending
+## Feature status
 
-**Implemented (this foundation):**
-- Project scaffold, security headers, env validation, instrumentation
-- Full Prisma data model + initial migration
-- AES-256-GCM encryption (unit-tested) and redaction (unit-tested)
-- RBAC with 4 roles; server-side enforcement
-- Auth.js Entra SSO with domain allowlist + group->role mapping
-- Connector framework: typed defs, retrying HTTP client, debug logging,
-  test/sync lifecycle, health + sync-run tracking
-- Connectors: QBO (OAuth + customer sync), TD SYNNEX (auth + test), Hudu,
-  SuperOps
-- App shell (tall left nav, lower-left account/status panel, main area)
-- Admin: connectors UI (configure/test/sync/enable), Security & SSO, audit log,
-  debug logs
-- Honest list pages: clients, billing, mappings, exceptions, reports
-- Vercel Cron: scheduled syncs + debug-log retention purge
+**Implemented:**
+- Scaffold, security headers + CSP, env validation, instrumentation
+- Full Prisma data model + migration (auth, connectors, clients/sources,
+  mappings, pricing, versioned billing runs, exceptions, QBO items)
+- AES-256-GCM encryption, redaction, RBAC, Entra SSO — all enforced server-side
+- Connector framework + four connectors with real configure/test/sync:
+  - **QuickBooks Online** — OAuth 2.0 connect, token refresh/rotation, customer
+    + item sync, **real invoice push** (approve-gated, partial-failure handling)
+  - **TD SYNNEX Stellr** — client-credentials auth, customer + subscription sync
+    (defensive field mapping; unverified endpoints fail visibly)
+  - **Hudu** (x-api-key) and **SuperOps** (GraphQL) — read-only sync for mapping
+- AI-assisted mapping: deterministic + confidence-scored client and SKU
+  proposals, mapping dashboard, confirm/reject, auto-confirm on exact matches
+- Discrepancy detection + reconciliation into the exception queue
+- Client profile with side-by-side QBO/TD SYNNEX boxes + live discrepancy flags
+- Billing-run generation (proration/pricing engine), pre-push report with
+  push-eligibility, state machine, QBO push, billing-run history
+- Reports: margin, revenue leakage, overbilling risk, change explanation;
+  CSV/Excel export for reports, exceptions, and billing runs
+- Vercel Cron: scheduled syncs + reconciliation + debug-log retention purge
+- 47 unit tests (encryption, redaction, proration, pricing, line math, state
+  machine, generation, similarity, discrepancies)
 
-**Pending (next milestones):**
-- QBO OAuth "Connect QuickBooks" callback route + item sync + invoice push
-- TD SYNNEX customer/subscription field mapping against verified response schema
-- Client profile with side-by-side QBO/TD SYNNEX comparison + discrepancy flags
-- AI-assisted client mapping + SKU mapping dashboards
-- Billing run generation, proration/adjustment engine, pre-push report, push
-- Report computations + CSV/Excel export
+**Known pragmatic limitations (by design / pending live verification):**
+- TD SYNNEX Stellr response field names are mapped defensively across common
+  envelopes; confirm against your region's API reference once available.
+- "AI" mapping confidence is a transparent token-similarity heuristic, not an
+  LLM call (deterministic, explainable, no external dependency).
+- Line-item inline editing UI and bulk multi-client run selection are not yet
+  surfaced (the engine and per-run model support them).
+
+## Deployment (Vercel + Neon)
+
+1. **Neon**: create a project; copy the **pooled** connection string to
+   `DATABASE_URL` and the **direct** one to `DIRECT_URL`.
+2. **Apply schema**: `pnpm exec prisma migrate deploy` (run locally against the
+   Neon DB, or as a Vercel build/deploy step).
+3. **Vercel**: import the repo. Set environment variables (Production +
+   Preview): `DATABASE_URL`, `DIRECT_URL`, `WOLF365_ENCRYPTION_KEY`,
+   `AUTH_SECRET`, `AUTH_URL` (your deployment URL), `CRON_SECRET`, and the
+   first-run `ENTRA_*` + `WOLF365_BOOTSTRAP_ADMINS` values.
+4. **Build**: the `build` script runs `prisma generate && next build`. The cron
+   schedule in `vercel.json` calls `/api/cron` daily (authenticated by
+   `CRON_SECRET`).
+5. **Entra app registration**: add redirect URIs
+   `https://<your-app>/api/auth/callback/microsoft-entra-id` (SSO) — sign in as
+   a bootstrap admin, then finalize SSO under **Security & SSO**.
+6. **QuickBooks app**: add redirect URI
+   `https://<your-app>/api/connectors/quickbooks/callback`, enter the client
+   id/secret in the connector, then click **Connect QuickBooks**.
 
 ## Scripts
 
