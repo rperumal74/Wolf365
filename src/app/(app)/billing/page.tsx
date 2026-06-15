@@ -1,6 +1,8 @@
 import { Receipt } from "lucide-react";
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
 
@@ -15,7 +17,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 /** Billing run history. Real runs only; empty until the first run is created. */
 export default async function BillingPage() {
-  await requirePermission("billing:read");
+  const user = await requirePermission("billing:read");
   const runs = await prisma.billingRun.findMany({
     orderBy: { createdAt: "desc" },
     include: { client: true, _count: { select: { lines: true } } },
@@ -27,6 +29,16 @@ export default async function BillingPage() {
       <PageHeader
         title="Billing Runs"
         description="Generate, review, approve, and push invoices to QuickBooks Online."
+        actions={
+          can(user.role, "billing:edit") ? (
+            <Link
+              href="/billing/new"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              New billing run
+            </Link>
+          ) : null
+        }
       />
       <div className="p-8">
         {runs.length === 0 ? (
@@ -38,7 +50,8 @@ export default async function BillingPage() {
         ) : (
           <div className="space-y-2">
             {runs.map((r) => (
-              <Card key={r.id} className="flex items-center justify-between">
+              <Link key={r.id} href={`/billing/${r.id}`}>
+                <Card className="flex items-center justify-between transition hover:border-primary/40">
                 <div>
                   <p className="font-medium">
                     {r.client?.name ?? "Bulk run"} · v{r.version}
@@ -55,7 +68,8 @@ export default async function BillingPage() {
                 >
                   {r.status.replaceAll("_", " ")}
                 </span>
-              </Card>
+                </Card>
+              </Link>
             ))}
           </div>
         )}
