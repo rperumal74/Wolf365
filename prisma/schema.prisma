@@ -1,0 +1,569 @@
+// Wolf365 data model.
+//
+// Conventions:
+// - All secret material (connector client secrets, OAuth refresh/access tokens)
+//   is stored ONLY in fields suffixed `Enc` and is app-level encrypted via
+//   src/lib/crypto.ts before it ever reaches the database. Never store secrets
+//   in plaintext columns.
+// - Source-of-truth customer records from each connector live in their own
+//   tables (QboCustomer, TdSynnexCustomer, ...) and are linked to the internal
+//   master `Client` via mapping rows so we can detect discrepancies.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth & RBAC
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER // Owner/Admin — full control incl. connectors, security, debug logs
+  ACCOUNTING_MANAGER // Approve & push billing runs, manage mappings
+  ACCOUNTING_USER // Create/edit billing runs, propose mappings
+  AUDITOR // Read-only / auditor
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  role          Role      @default(AUDITOR)
+  // Entra object id / group claims captured at login for traceability.
+  entraOid      String?   @unique
+  disabled      Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  auditLogs AuditLog[]
+
+  @@index([role])
+}
+
+// Auth.js (NextAuth) adapter models.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Admin-configurable Entra ID SSO. Single active row (singleton) selected by
+// `active`. clientSecretEnc is app-level encrypted.
+model SsoSettings {
+  id                String   @id @default(cuid())
+  active            Boolean  @default(true)
+  tenantId          String
+  clientId          String
+  clientSecretEnc   String   @db.Text
+  // Comma/array of domains permitted to sign in, e.g. ["wolfstrata.com"].
+  allowedDomains    String[]
+  // Optional Entra group object-id -> Role mapping, e.g. { "<groupId>": "OWNER" }.
+  groupRoleMappings Json     @default("{}")
+  updatedBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Connectors
+// ---------------------------------------------------------------------------
+
+enum ConnectorType {
+  TD_SYNNEX_STELLR
+  QUICKBOOKS_ONLINE
+  HUDU
+  SUPEROPS
+}
+
+enum ConnectorHealth {
+  UNCONFIGURED
+  HEALTHY
+  DEGRADED
+  ERROR
+}
+
+model Connector {
+  id      String        @id @default(cuid())
+  type    ConnectorType @unique
+  enabled Boolean       @default(false)
+
+  // Non-secret configuration (environment, region, base URL, realmId, ...).
+  config Json @default("{}")
+  // App-level encrypted JSON blob of secret material (client secret, tokens).
+  secretsEnc String? @db.Text
+
+  health ConnectorHealth @default(UNCONFIGURED)
+
+  lastSuccessfulSyncAt DateTime?
+  lastFailedSyncAt     DateTime?
+  lastError            String?   @db.Text
+  lastSyncDurationMs   Int?
+  lastRecordsImported  Int?
+  lastRecordsUpdated   Int?
+  lastRecordsSkipped   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  syncRuns  SyncRun[]
+  debugLogs DebugLog[]
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+model SyncRun {
+  id          String        @id @default(cuid())
+  connectorId String
+  connector   Connector     @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  type        ConnectorType
+  status      SyncStatus    @default(RUNNING)
+  trigger     String // "manual" | "cron" | "test"
+
+  startedAt        DateTime  @default(now())
+  finishedAt       DateTime?
+  durationMs       Int?
+  recordsImported  Int       @default(0)
+  recordsUpdated   Int       @default(0)
+  recordsSkipped   Int       @default(0)
+  error            String?   @db.Text
+  // Optional safe summary of what was synced. Never contains secrets.
+  summary          Json?
+
+  startedById String?
+
+  @@index([connectorId, startedAt])
+  @@index([type, status])
+}
+
+// Admin-only connector debug log. Secrets are NEVER written here; see
+// src/lib/debug-log.ts which enforces redaction.
+model DebugLog {
+  id          String        @id @default(cuid())
+  connectorId String?
+  connector   Connector?    @relation(fields: [connectorId], references: [id], onDelete: SetNull)
+  type        ConnectorType
+  environment String? // "sandbox" | "production" | region label
+
+  action       String // human action, e.g. "test_connection", "sync_customers"
+  endpoint     String? // path only, query string stripped, no secrets
+  httpMethod   String?
+  httpStatus   Int?
+  durationMs   Int?
+  correlationId String?
+  recordsRequested Int?
+  recordsReturned  Int?
+  recordsCreated   Int?
+  recordsUpdated   Int?
+  recordsSkipped   Int?
+  authStatus   String? // "ok" | "refreshed" | "expired" | "failed"
+  retryAttempts Int     @default(0)
+  rateLimited  Boolean  @default(false)
+  outcome      String // "success" | "failure"
+  // Safe, redacted error message only.
+  message      String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([connectorId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (security-relevant actions)
+// ---------------------------------------------------------------------------
+
+enum AuditAction {
+  LOGIN
+  CONNECTOR_CONFIG_CHANGED
+  CONNECTOR_ENABLED
+  CONNECTOR_DISABLED
+  SYNC_RUN
+  MAPPING_CHANGED
+  BILLING_RUN_CREATED
+  BILLING_LINE_EDITED
+  BILLING_RUN_APPROVED
+  QBO_INVOICE_PUSHED
+  EXPORT
+  SSO_SETTINGS_CHANGED
+  USER_ROLE_CHANGED
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  action    AuditAction
+  actorId   String?
+  actor     User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String?    // denormalized so the record survives user deletion
+  // Free-form target reference, e.g. "connector:QUICKBOOKS_ONLINE".
+  target    String?
+  metadata  Json?       // safe, non-secret context
+  ip        String?
+  createdAt DateTime    @default(now())
+
+  @@index([action, createdAt])
+  @@index([actorId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Clients (internal master) + source-of-truth records
+// ---------------------------------------------------------------------------
+
+model Client {
+  id          String  @id @default(cuid())
+  // Internal canonical display name (defaults from a source, editable).
+  name        String
+  notes       String? @db.Text
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  qboCustomer      QboCustomer?
+  tdSynnexCustomer TdSynnexCustomer?
+  huduMatch        HuduCompany?
+  superOpsMatch    SuperOpsClient?
+
+  billingRuns BillingRun[]
+  exceptions  Exception[]
+
+  @@index([name])
+}
+
+// QuickBooks Online customer snapshot.
+model QboCustomer {
+  id           String  @id @default(cuid())
+  clientId     String? @unique
+  client       Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  qboId        String  @unique // QBO Customer Id
+  realmId      String
+  displayName  String
+  companyName  String?
+  billingEmail String?
+  billingAddress Json?
+  taxable      Boolean?
+  taxStatus    String?
+  currency     String?
+  paymentTerms String?
+  active       Boolean @default(true)
+  raw          Json? // safe snapshot; QBO customer data contains no secrets
+  lastSyncedAt DateTime @default(now())
+
+  @@index([realmId])
+}
+
+// TD SYNNEX StreamOne Stellr customer/account snapshot.
+model TdSynnexCustomer {
+  id            String  @id @default(cuid())
+  clientId      String? @unique
+  client        Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  stellrId      String  @unique // StreamOne customer/account id
+  name          String
+  domain        String?
+  microsoftTenantId String?
+  serviceAddress Json?
+  active        Boolean @default(true)
+  raw           Json?
+  lastSyncedAt  DateTime @default(now())
+
+  subscriptions TdSynnexSubscription[]
+
+  @@index([microsoftTenantId])
+}
+
+// Microsoft 365 / NCE subscription under a TD SYNNEX customer.
+model TdSynnexSubscription {
+  id                 String  @id @default(cuid())
+  customerId         String
+  customer           TdSynnexCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  stellrSubscriptionId String @unique
+  productSku         String?
+  productName        String?
+  quantity           Int     @default(0)
+  unitCost           Decimal? @db.Decimal(18, 4)
+  currency           String?
+
+  // NCE commitment metadata.
+  commitmentTerm     String? // "monthly" | "annual" | "triennial"
+  billingFrequency   String? // "monthly" | "annual"
+  startDate          DateTime?
+  renewalDate        DateTime?
+  cancellationWindowEnds DateTime?
+  reducible          Boolean? // false => NCE rules prevent seat reduction
+  status             String?
+  raw                Json?
+  lastSyncedAt       DateTime @default(now())
+
+  @@index([customerId])
+  @@index([productSku])
+}
+
+// Hudu / SuperOps records kept for mapping only (core app does not push to them).
+model HuduCompany {
+  id        String  @id @default(cuid())
+  clientId  String? @unique
+  client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  huduId    String  @unique
+  name      String
+  raw       Json?
+  lastSyncedAt DateTime @default(now())
+}
+
+model SuperOpsClient {
+  id         String  @id @default(cuid())
+  clientId   String? @unique
+  client     Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  superOpsId String  @unique
+  name       String
+  raw        Json?
+  lastSyncedAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Mapping (client + SKU/product) with confidence & approval
+// ---------------------------------------------------------------------------
+
+enum MappingStatus {
+  PROPOSED // deterministic/AI proposal awaiting human review
+  CONFIRMED // human approved
+  REJECTED
+}
+
+enum MappingMethod {
+  DETERMINISTIC
+  AI_ASSISTED
+  MANUAL
+}
+
+// Product/SKU mapping between a TD SYNNEX SKU and a QBO item.
+model ProductMapping {
+  id           String        @id @default(cuid())
+  tdSynnexSku  String
+  qboItemId    String?
+  qboItemName  String?
+  status       MappingStatus @default(PROPOSED)
+  method       MappingMethod @default(DETERMINISTIC)
+  confidence   Float? // 0..1
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([tdSynnexSku])
+}
+
+// ---------------------------------------------------------------------------
+// Pricing rules
+// ---------------------------------------------------------------------------
+
+enum PriceRuleScope {
+  GLOBAL_MARKUP // default markup applied when no more specific rule matches
+  SKU // SKU-specific price/markup
+  CUSTOMER // customer-specific pricing
+  CUSTOMER_SKU // customer + SKU specific (most specific)
+}
+
+model PriceRule {
+  id        String         @id @default(cuid())
+  scope     PriceRuleScope
+  clientId  String?
+  sku       String?
+  // Exactly one resolution strategy is used per rule.
+  markupPct Decimal? @db.Decimal(9, 4) // e.g. 15.0000 => +15%
+  fixedUnitPrice Decimal? @db.Decimal(18, 4)
+  active    Boolean @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scope])
+  @@index([clientId])
+  @@index([sku])
+}
+
+// ---------------------------------------------------------------------------
+// Billing runs
+// ---------------------------------------------------------------------------
+
+enum BillingRunStatus {
+  DRAFT
+  REVIEWED
+  APPROVED
+  PUSHED
+  PARTIALLY_FAILED
+  CANCELLED
+}
+
+model BillingRun {
+  id          String           @id @default(cuid())
+  status      BillingRunStatus @default(DRAFT)
+  version     Int              @default(1)
+
+  // Billing period.
+  periodStart DateTime
+  periodEnd   DateTime
+  invoiceDate DateTime
+
+  clientId    String?
+  client      Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  approvedById String?
+  approvedAt   DateTime?
+  pushedAt     DateTime?
+
+  notes       String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines   BillingLine[]
+  edits   BillingLineEdit[]
+
+  @@index([status, createdAt])
+  @@index([clientId])
+}
+
+model BillingLine {
+  id           String   @id @default(cuid())
+  billingRunId String
+  billingRun   BillingRun @relation(fields: [billingRunId], references: [id], onDelete: Cascade)
+
+  // Source references.
+  tdSynnexSubscriptionId String?
+  qboItemId    String?
+  description  String
+
+  quantity     Decimal @db.Decimal(18, 4)
+  unitPrice    Decimal @db.Decimal(18, 4)
+  // Proration factor 0..1 (days billed / days in period).
+  prorationFactor Decimal @default(1) @db.Decimal(9, 6)
+  proratedDays Int?
+  periodDays   Int?
+  discount     Decimal @default(0) @db.Decimal(18, 4)
+  adjustment   Decimal @default(0) @db.Decimal(18, 4)
+  estimatedCost Decimal? @db.Decimal(18, 4) // TD SYNNEX cost for margin reporting
+  taxStatus    String?
+  subtotal     Decimal @db.Decimal(18, 4)
+  total        Decimal @db.Decimal(18, 4)
+  notes        String?
+
+  // Push results.
+  qboInvoiceId String?
+  pushError    String? @db.Text
+
+  edits BillingLineEdit[]
+
+  @@index([billingRunId])
+}
+
+// Immutable trail of who changed which line and when.
+model BillingLineEdit {
+  id           String   @id @default(cuid())
+  billingRunId String
+  billingRun   BillingRun @relation(fields: [billingRunId], references: [id], onDelete: Cascade)
+  billingLineId String?
+  billingLine  BillingLine? @relation(fields: [billingLineId], references: [id], onDelete: SetNull)
+
+  field    String
+  oldValue String?
+  newValue String?
+  editedById String?
+  editedByEmail String?
+  createdAt DateTime @default(now())
+
+  @@index([billingRunId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Exceptions / reconciliation queue
+// ---------------------------------------------------------------------------
+
+enum ExceptionType {
+  UNMAPPED_CLIENT
+  UNMAPPED_SKU
+  MISSING_QBO_CUSTOMER
+  MISSING_PRICE
+  INACTIVE_CLIENT
+  TAX_MISMATCH
+  CURRENCY_MISMATCH
+  CONNECTOR_FAILURE
+  NAME_MISMATCH
+  ADDRESS_MISMATCH
+  MISSING_BILLING_EMAIL
+  CLIENT_ONLY_IN_QBO
+  CLIENT_ONLY_IN_TDSYNNEX
+  ACTIVE_STATUS_MISMATCH
+  POSSIBLE_DUPLICATE
+}
+
+enum ExceptionStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+model Exception {
+  id        String          @id @default(cuid())
+  type      ExceptionType
+  status    ExceptionStatus @default(OPEN)
+  severity  String          @default("warning") // "info" | "warning" | "error"
+  clientId  String?
+  client    Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  message   String
+  details   Json?
+  createdAt DateTime        @default(now())
+  resolvedAt DateTime?
+
+  @@index([type, status])
+  @@index([clientId])
+}

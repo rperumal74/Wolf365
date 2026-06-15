@@ -1,0 +1,29 @@
+import type { ConnectorType } from "@prisma/client";
+import type { ConnectorDefinition } from "@/connectors/types";
+import { quickbooksConnector } from "@/connectors/quickbooks";
+import { tdSynnexConnector } from "@/connectors/tdsynnex";
+import { huduConnector } from "@/connectors/hudu";
+import { superOpsConnector } from "@/connectors/superops";
+
+/**
+ * Central registry of connector definitions. The admin UI and runtime resolve
+ * connectors by type through here, so adding a connector is a one-line change.
+ */
+const REGISTRY: Record<ConnectorType, ConnectorDefinition<any, any>> = {
+  TD_SYNNEX_STELLR: tdSynnexConnector,
+  QUICKBOOKS_ONLINE: quickbooksConnector,
+  HUDU: huduConnector,
+  SUPEROPS: superOpsConnector,
+};
+
+export function getConnectorDefinition(
+  type: ConnectorType,
+): ConnectorDefinition<any, any> {
+  const def = REGISTRY[type];
+  if (!def) throw new Error(`Unknown connector type: ${type}`);
+  return def;
+}
+
+export function listConnectorDefinitions(): ConnectorDefinition<any, any>[] {
+  return Object.values(REGISTRY);
+}
