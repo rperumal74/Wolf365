@@ -1,4 +1,5 @@
-import { BarChart3 } from "lucide-react";
+import Link from "next/link";
+import { BarChart3, ChevronRight } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card } from "@/components/ui/primitives";
 
@@ -8,20 +9,24 @@ import { PageHeader, Card } from "@/components/ui/primitives";
  */
 const REPORTS = [
   {
+    href: "/reports/leakage",
     title: "Revenue leakage",
     description: "Licenses present in TD SYNNEX but not billed in QuickBooks.",
   },
   {
+    href: "/reports/overbilling",
     title: "Overbilling risk",
     description: "QBO billing items that no longer exist in TD SYNNEX.",
   },
   {
+    href: "/reports/margin",
     title: "Margin report",
     description: "Estimated TD SYNNEX cost vs. invoiced revenue by client/SKU.",
   },
   {
-    title: "Change explanation",
-    description: "Plain-English explanation of why an invoice changed since last period.",
+    href: "/exceptions",
+    title: "Exception queue",
+    description: "Unmapped clients/SKUs, missing prices, and discrepancies.",
   },
 ];
 
@@ -35,16 +40,18 @@ export default async function ReportsPage() {
       />
       <div className="grid grid-cols-1 gap-4 p-8 sm:grid-cols-2">
         {REPORTS.map((r) => (
-          <Card key={r.title}>
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              <h2 className="font-medium">{r.title}</h2>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">{r.description}</p>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Available once connectors are synced and billing runs exist.
-            </p>
-          </Card>
+          <Link key={r.href} href={r.href}>
+            <Card className="flex items-center justify-between transition hover:border-primary/40">
+              <div>
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="font-medium">{r.title}</h2>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{r.description}</p>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </Card>
+          </Link>
         ))}
       </div>
     </div>

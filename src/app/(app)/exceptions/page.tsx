@@ -1,6 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
 
@@ -13,7 +14,7 @@ const SEVERITY_STYLES: Record<string, string> = {
 /** Exception / reconciliation queue. Real rows produced by sync + discrepancy
  * detection; empty when there is genuinely nothing to resolve. */
 export default async function ExceptionsPage() {
-  await requirePermission("reports:read");
+  const user = await requirePermission("reports:read");
   const exceptions = await prisma.exception.findMany({
     where: { status: { not: "RESOLVED" } },
     orderBy: { createdAt: "desc" },
@@ -26,6 +27,16 @@ export default async function ExceptionsPage() {
       <PageHeader
         title="Exceptions"
         description="Unmapped clients/SKUs, missing prices, discrepancies, and connector failures."
+        actions={
+          can(user.role, "reports:export") && exceptions.length > 0 ? (
+            <a
+              href="/api/export?type=exceptions"
+              className="rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+            >
+              Export CSV
+            </a>
+          ) : null
+        }
       />
       <div className="p-8">
         {exceptions.length === 0 ? (

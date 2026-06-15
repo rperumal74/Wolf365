@@ -299,6 +299,24 @@ model QboCustomer {
   @@index([realmId])
 }
 
+// QuickBooks Online item (product/service) snapshot, used for invoice lines
+// and SKU mapping.
+model QboItem {
+  id                 String   @id @default(cuid())
+  qboId              String   @unique
+  realmId            String
+  name               String
+  fullyQualifiedName String?
+  type               String? // Service, Inventory, NonInventory, ...
+  unitPrice          Decimal? @db.Decimal(18, 4)
+  active             Boolean  @default(true)
+  raw                Json?
+  lastSyncedAt       DateTime @default(now())
+
+  @@index([realmId])
+  @@index([name])
+}
+
 // TD SYNNEX StreamOne Stellr customer/account snapshot.
 model TdSynnexCustomer {
   id            String  @id @default(cuid())
@@ -384,6 +402,24 @@ enum MappingMethod {
   MANUAL
 }
 
+// Proposed client link between a QBO customer and a TD SYNNEX customer,
+// produced by deterministic + AI-assisted matching and confirmed by a human.
+model ClientMatchProposal {
+  id                 String        @id @default(cuid())
+  qboCustomerId      String
+  tdSynnexCustomerId String
+  confidence         Float
+  method             MappingMethod @default(DETERMINISTIC)
+  status             MappingStatus @default(PROPOSED)
+  reviewedById       String?
+  reviewedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([qboCustomerId, tdSynnexCustomerId])
+  @@index([status])
+}
+
 // Product/SKU mapping between a TD SYNNEX SKU and a QBO item.
 model ProductMapping {
   id           String        @id @default(cuid())
@@ -460,6 +496,9 @@ model BillingRun {
   approvedById String?
   approvedAt   DateTime?
   pushedAt     DateTime?
+  // QBO invoice id created for this run (single invoice per client run).
+  qboInvoiceId String?
+  pushError    String?   @db.Text
 
   notes       String? @db.Text
 

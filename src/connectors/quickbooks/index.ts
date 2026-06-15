@@ -160,14 +160,71 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
       startPosition += pageSize;
     }
 
+    // --- Items (products/services) for invoice lines + SKU mapping ----------
+    let itemStart = 1;
+    for (;;) {
+      const query = encodeURIComponent(
+        `select * from Item startposition ${itemStart} maxresults ${pageSize}`,
+      );
+      const res = await qboGet(
+        ctx,
+        `/v3/company/${realmId}/query?query=${query}`,
+        "sync_items",
+      );
+      if (!res.ok) break; // items are best-effort; customers already synced
+      const items =
+        (res.json as { QueryResponse?: { Item?: QboItemRaw[] } })?.QueryResponse
+          ?.Item ?? [];
+      if (items.length === 0) break;
+      for (const it of items) {
+        const result = await upsertQboItem(realmId, it);
+        if (result === "created") imported += 1;
+        else updated += 1;
+      }
+      if (items.length < pageSize) break;
+      itemStart += pageSize;
+    }
+
     return {
       imported,
       updated,
       skipped,
-      summary: { entity: "customers", realmId },
+      summary: { entity: "customers+items", realmId },
     };
   },
 };
+
+interface QboItemRaw {
+  Id: string;
+  Name?: string;
+  FullyQualifiedName?: string;
+  Type?: string;
+  UnitPrice?: number;
+  Active?: boolean;
+}
+
+async function upsertQboItem(
+  realmId: string,
+  it: QboItemRaw,
+): Promise<"created" | "updated"> {
+  const existing = await prisma.qboItem.findUnique({ where: { qboId: it.Id } });
+  const data = {
+    realmId,
+    name: it.Name ?? `Item ${it.Id}`,
+    fullyQualifiedName: it.FullyQualifiedName ?? null,
+    type: it.Type ?? null,
+    unitPrice: it.UnitPrice ?? null,
+    active: it.Active ?? true,
+    raw: it as unknown as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  if (existing) {
+    await prisma.qboItem.update({ where: { qboId: it.Id }, data });
+    return "updated";
+  }
+  await prisma.qboItem.create({ data: { qboId: it.Id, ...data } });
+  return "created";
+}
 
 interface QboCustomerRaw {
   Id: string;

@@ -217,6 +217,22 @@ CREATE TABLE "QboCustomer" (
 );
 
 -- CreateTable
+CREATE TABLE "QboItem" (
+    "id" TEXT NOT NULL,
+    "qboId" TEXT NOT NULL,
+    "realmId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "fullyQualifiedName" TEXT,
+    "type" TEXT,
+    "unitPrice" DECIMAL(18,4),
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "raw" JSONB,
+    "lastSyncedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "QboItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "TdSynnexCustomer" (
     "id" TEXT NOT NULL,
     "clientId" TEXT,
@@ -280,6 +296,22 @@ CREATE TABLE "SuperOpsClient" (
 );
 
 -- CreateTable
+CREATE TABLE "ClientMatchProposal" (
+    "id" TEXT NOT NULL,
+    "qboCustomerId" TEXT NOT NULL,
+    "tdSynnexCustomerId" TEXT NOT NULL,
+    "confidence" DOUBLE PRECISION NOT NULL,
+    "method" "MappingMethod" NOT NULL DEFAULT 'DETERMINISTIC',
+    "status" "MappingStatus" NOT NULL DEFAULT 'PROPOSED',
+    "reviewedById" TEXT,
+    "reviewedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ClientMatchProposal_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ProductMapping" (
     "id" TEXT NOT NULL,
     "tdSynnexSku" TEXT NOT NULL,
@@ -325,6 +357,8 @@ CREATE TABLE "BillingRun" (
     "approvedById" TEXT,
     "approvedAt" TIMESTAMP(3),
     "pushedAt" TIMESTAMP(3),
+    "qboInvoiceId" TEXT,
+    "pushError" TEXT,
     "notes" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -448,6 +482,15 @@ CREATE UNIQUE INDEX "QboCustomer_qboId_key" ON "QboCustomer"("qboId");
 CREATE INDEX "QboCustomer_realmId_idx" ON "QboCustomer"("realmId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "QboItem_qboId_key" ON "QboItem"("qboId");
+
+-- CreateIndex
+CREATE INDEX "QboItem_realmId_idx" ON "QboItem"("realmId");
+
+-- CreateIndex
+CREATE INDEX "QboItem_name_idx" ON "QboItem"("name");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "TdSynnexCustomer_clientId_key" ON "TdSynnexCustomer"("clientId");
 
 -- CreateIndex
@@ -476,6 +519,12 @@ CREATE UNIQUE INDEX "SuperOpsClient_clientId_key" ON "SuperOpsClient"("clientId"
 
 -- CreateIndex
 CREATE UNIQUE INDEX "SuperOpsClient_superOpsId_key" ON "SuperOpsClient"("superOpsId");
+
+-- CreateIndex
+CREATE INDEX "ClientMatchProposal_status_idx" ON "ClientMatchProposal"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ClientMatchProposal_qboCustomerId_tdSynnexCustomerId_key" ON "ClientMatchProposal"("qboCustomerId", "tdSynnexCustomerId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ProductMapping_tdSynnexSku_key" ON "ProductMapping"("tdSynnexSku");

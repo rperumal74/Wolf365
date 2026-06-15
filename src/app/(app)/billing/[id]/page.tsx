@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { transitionRunAction } from "../actions";
+import { transitionRunAction, pushRunAction } from "../actions";
 
 const STATUS_STYLES: Record<string, string> = {
   DRAFT: "bg-muted text-muted-foreground",
@@ -51,9 +51,19 @@ export default async function BillingRunDetailPage({
         title={`Billing run — ${run.client?.name ?? "Unknown client"}`}
         description="Pre-push report. Review every line before pushing to QuickBooks."
         actions={
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[run.status]}`}>
-            {run.status.replaceAll("_", " ")}
-          </span>
+          <div className="flex items-center gap-3">
+            {can(user.role, "reports:export") && (
+              <a
+                href={`/api/export?type=run&runId=${run.id}`}
+                className="rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+              >
+                Export CSV
+              </a>
+            )}
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[run.status]}`}>
+              {run.status.replaceAll("_", " ")}
+            </span>
+          </div>
         }
       />
       <div className="space-y-6 p-8">
@@ -157,15 +167,27 @@ export default async function BillingRunDetailPage({
                 <TransitionButton runId={run.id} to="DRAFT" label="Back to draft" subtle />
               </>
             )}
-            {run.status === "APPROVED" && (
-              <button
-                type="button"
-                disabled
-                title="QuickBooks invoice push ships in the next milestone."
-                className="cursor-not-allowed rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground opacity-50"
-              >
-                Approve &amp; Push Selected Invoices to QuickBooks Online
-              </button>
+            {run.status === "APPROVED" && can(user.role, "billing:push") && (
+              <form action={pushRunAction}>
+                <input type="hidden" name="runId" value={run.id} />
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                >
+                  Approve &amp; Push Selected Invoices to QuickBooks Online
+                </button>
+              </form>
+            )}
+            {run.status === "PARTIALLY_FAILED" && can(user.role, "billing:push") && (
+              <form action={pushRunAction}>
+                <input type="hidden" name="runId" value={run.id} />
+                <button
+                  type="submit"
+                  className="rounded-md border border-danger/40 px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10"
+                >
+                  Retry push to QuickBooks
+                </button>
+              </form>
             )}
             {(run.status === "DRAFT" || run.status === "REVIEWED" || run.status === "APPROVED") && (
               <TransitionButton runId={run.id} to="CANCELLED" label="Cancel run" subtle />

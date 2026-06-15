@@ -1,5 +1,8 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
 import { connectorFetch } from "@/connectors/http";
 import type {
+  ConnectorContext,
   ConnectorDefinition,
   ConnectorSyncResult,
   ConnectorTestResult,
@@ -152,46 +155,174 @@ export const tdSynnexConnector: ConnectorDefinition<
           "to be configured. Add it from the Stellr API reference for your region.",
       );
     }
-    const token = await getStellrAccessToken(ctx.config, ctx.secrets, (next) =>
-      ctx.saveSecrets(next),
-    );
-    const base = ctx.config.apiBaseUrl!.replace(/\/$/, "");
-    const url = `${base}${ctx.config.customersPath}`;
 
-    const res = await connectorFetch(url, {
-      connectorType: "TD_SYNNEX_STELLR",
-      connectorId: ctx.connectorId,
-      environment: ctx.config.environment ?? ctx.config.region ?? null,
-      action: "sync_customers",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) {
-      throw new Error(
-        `TD SYNNEX customer sync failed (HTTP ${res.status}). Verify the resource path.`,
-      );
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    const customers = await fetchJsonList(ctx, ctx.config.customersPath, "sync_customers");
+    for (const raw of customers) {
+      const result = await upsertTdCustomer(raw);
+      if (result === "created") imported += 1;
+      else updated += 1;
     }
 
-    // The exact response envelope is region/version specific. We persist the
-    // count we can observe and defer field mapping until the verified schema is
-    // wired in customer-upsert logic, rather than guessing field names.
-    const parsed = JSON.parse(res.body) as unknown;
-    const count = Array.isArray(parsed)
-      ? parsed.length
-      : Array.isArray((parsed as { items?: unknown[] })?.items)
-        ? (parsed as { items: unknown[] }).items.length
-        : 0;
+    // Subscriptions are optional; only sync if the path is configured.
+    let subCount = 0;
+    if (ctx.config.subscriptionsPath) {
+      const subs = await fetchJsonList(
+        ctx,
+        ctx.config.subscriptionsPath,
+        "sync_subscriptions",
+      );
+      for (const raw of subs) {
+        const ok = await upsertTdSubscription(raw);
+        if (ok) subCount += 1;
+        else skipped += 1;
+      }
+    }
 
     return {
-      imported: 0,
-      updated: 0,
-      skipped: count,
-      summary: {
-        note: "Records fetched; field mapping pending verified Stellr response schema.",
-        observedCount: count,
-      },
+      imported,
+      updated,
+      skipped,
+      summary: { customers: customers.length, subscriptions: subCount },
     };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Response parsing + persistence.
+//
+// The Stellr response envelope and exact field names vary by region/version.
+// We read defensively across the common shapes (top-level array, or items/data/
+// results/customers/subscriptions wrappers) and map well-known field aliases.
+// A wrong path still surfaces the real HTTP error — we never fabricate records.
+// ---------------------------------------------------------------------------
+
+async function fetchJsonList(
+  ctx: ConnectorContext<StellrConfig, StellrSecrets>,
+  path: string,
+  action: string,
+): Promise<Record<string, unknown>[]> {
+  const token = await getStellrAccessToken(ctx.config, ctx.secrets, (next) =>
+    ctx.saveSecrets(next),
+  );
+  const base = ctx.config.apiBaseUrl!.replace(/\/$/, "");
+  const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  const res = await connectorFetch(url, {
+    connectorType: "TD_SYNNEX_STELLR",
+    connectorId: ctx.connectorId,
+    environment: ctx.config.environment ?? ctx.config.region ?? null,
+    action,
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`TD SYNNEX ${action} failed (HTTP ${res.status}). Verify the resource path.`);
+  }
+  return extractArray(JSON.parse(res.body));
+}
+
+function extractArray(parsed: unknown): Record<string, unknown>[] {
+  if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
+  const obj = (parsed ?? {}) as Record<string, unknown>;
+  for (const key of ["items", "data", "results", "customers", "subscriptions"]) {
+    if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
+  }
+  return [];
+}
+
+function pick(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v;
+    if (typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+function pickNumber(obj: Record<string, unknown>, keys: string[]): number | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v))) return Number(v);
+  }
+  return null;
+}
+
+async function upsertTdCustomer(
+  raw: Record<string, unknown>,
+): Promise<"created" | "updated" | "skipped"> {
+  const stellrId = pick(raw, ["id", "customerId", "accountId", "customerNumber"]);
+  if (!stellrId) return "skipped";
+  const name =
+    pick(raw, ["name", "companyName", "customerName", "displayName"]) ??
+    `Customer ${stellrId}`;
+  const data = {
+    name,
+    domain: pick(raw, ["domain", "defaultDomain", "primaryDomain"]),
+    microsoftTenantId: pick(raw, ["microsoftTenantId", "tenantId", "msTenantId"]),
+    serviceAddress: (raw.address ?? raw.serviceAddress ?? undefined) as
+      | Prisma.InputJsonValue
+      | undefined,
+    active: deriveActive(raw),
+    raw: raw as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  const existing = await prisma.tdSynnexCustomer.findUnique({ where: { stellrId } });
+  if (existing) {
+    await prisma.tdSynnexCustomer.update({ where: { stellrId }, data });
+    return "updated";
+  }
+  await prisma.tdSynnexCustomer.create({ data: { stellrId, ...data } });
+  return "created";
+}
+
+async function upsertTdSubscription(raw: Record<string, unknown>): Promise<boolean> {
+  const stellrSubscriptionId = pick(raw, ["id", "subscriptionId", "agreementId"]);
+  const customerStellrId = pick(raw, ["customerId", "accountId", "customer"]);
+  if (!stellrSubscriptionId || !customerStellrId) return false;
+
+  const customer = await prisma.tdSynnexCustomer.findUnique({
+    where: { stellrId: customerStellrId },
+  });
+  if (!customer) return false; // customer must be synced first
+
+  const data = {
+    customerId: customer.id,
+    productSku: pick(raw, ["sku", "productSku", "partNumber"]),
+    productName: pick(raw, ["productName", "name", "description"]),
+    quantity: pickNumber(raw, ["quantity", "seats", "qty"]) ?? 0,
+    unitCost: pickNumber(raw, ["unitCost", "cost", "price", "unitPrice"]),
+    currency: pick(raw, ["currency", "currencyCode"]),
+    commitmentTerm: pick(raw, ["commitmentTerm", "term", "billingTerm"]),
+    billingFrequency: pick(raw, ["billingFrequency", "billingCycle"]),
+    startDate: parseDate(raw, ["startDate", "effectiveDate", "createdDate"]),
+    renewalDate: parseDate(raw, ["renewalDate", "endDate", "expiryDate"]),
+    cancellationWindowEnds: parseDate(raw, ["cancellationWindowEnds", "cancellationDeadline"]),
+    reducible: typeof raw.reducible === "boolean" ? raw.reducible : null,
+    status: pick(raw, ["status", "state"]),
+    raw: raw as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  await prisma.tdSynnexSubscription.upsert({
+    where: { stellrSubscriptionId },
+    create: { stellrSubscriptionId, ...data },
+    update: data,
+  });
+  return true;
+}
+
+function deriveActive(raw: Record<string, unknown>): boolean {
+  if (typeof raw.active === "boolean") return raw.active;
+  const status = pick(raw, ["status", "state"])?.toLowerCase();
+  if (!status) return true;
+  return !["inactive", "suspended", "cancelled", "canceled", "disabled"].includes(status);
+}
+
+function parseDate(raw: Record<string, unknown>, keys: string[]): Date | null {
+  const v = pick(raw, keys);
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
