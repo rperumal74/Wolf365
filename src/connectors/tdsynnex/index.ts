@@ -1,6 +1,5 @@
 import { connectorFetch } from "@/connectors/http";
 import type {
-  ConnectorContext,
   ConnectorDefinition,
   ConnectorSyncResult,
   ConnectorTestResult,

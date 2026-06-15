@@ -31,7 +31,19 @@ const serverSchema = z.object({
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be set (>=16 chars)"),
   AUTH_URL: z.string().url().optional(),
 
+  // Optional first-run Entra SSO bootstrap. Used ONLY until SSO is configured
+  // in-app (SsoSettings row). Lets a bootstrap admin sign in to configure SSO.
+  ENTRA_TENANT_ID: z.string().optional(),
+  ENTRA_CLIENT_ID: z.string().optional(),
+  ENTRA_CLIENT_SECRET: z.string().optional(),
+
   WOLF365_BOOTSTRAP_ADMINS: z.string().optional().default(""),
+
+  // Shared secret used to authenticate Vercel Cron invocations. Optional in
+  // development; required for the cron endpoint to do any work.
+  CRON_SECRET: z.string().optional(),
+  // Debug-log retention in days (30–90 typical).
+  WOLF365_DEBUG_LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
   NODE_ENV: z
     .enum(["development", "test", "production"])
