@@ -77,10 +77,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
           (profile as { sub?: string })?.sub ??
           null;
 
+        // Role derivation (least privilege):
+        // - Bootstrap admins are always OWNER.
+        // - When group→role mappings are configured, role is derived strictly
+        //   from current group membership, defaulting to AUDITOR if no group
+        //   matches. This DOWNGRADES users who lose an elevated group, instead
+        //   of letting stale privileges persist.
+        // - When no group mappings exist, roles are managed manually elsewhere
+        //   and are left untouched here.
         let role: Role | null = null;
         if (bootstrapAdmins.includes(email)) {
           role = "OWNER";
-        } else if (sso) {
+        } else if (sso && Object.keys(sso.groupRoleMappings).length > 0) {
+          role = "AUDITOR";
           for (const g of groups) {
             const mapped = sso.groupRoleMappings[g];
             if (mapped) {
