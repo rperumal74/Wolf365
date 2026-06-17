@@ -226,10 +226,46 @@ async function fetchJsonList(
 function extractArray(parsed: unknown): Record<string, unknown>[] {
   if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
   const obj = (parsed ?? {}) as Record<string, unknown>;
-  for (const key of ["items", "data", "results", "customers", "subscriptions"]) {
+  // Known wrapper keys first (incl. Spring-style `content`).
+  for (const key of [
+    "content",
+    "items",
+    "data",
+    "results",
+    "value",
+    "customers",
+    "subscriptions",
+  ]) {
     if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
   }
+  // Fallback: first array-of-objects found at the top level, then one level
+  // deep (handles e.g. { data: { content: [...] } }) — avoids guessing the
+  // exact wrapper name while still ignoring scalar/metadata arrays.
+  const topArray = firstObjectArray(obj);
+  if (topArray) return topArray;
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const nested = firstObjectArray(v as Record<string, unknown>);
+      if (nested) return nested;
+    }
+  }
   return [];
+}
+
+function firstObjectArray(
+  obj: Record<string, unknown>,
+): Record<string, unknown>[] | null {
+  for (const v of Object.values(obj)) {
+    if (
+      Array.isArray(v) &&
+      v.length > 0 &&
+      typeof v[0] === "object" &&
+      v[0] !== null
+    ) {
+      return v as Record<string, unknown>[];
+    }
+  }
+  return null;
 }
 
 function pick(obj: Record<string, unknown>, keys: string[]): string | null {
