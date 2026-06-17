@@ -18,16 +18,28 @@ import type {
  * never leave this layer except into the connector code itself.
  */
 
-/** Build a runtime context with decrypted secrets for a stored connector. */
+/**
+ * Build a runtime context with decrypted secrets for a stored connector.
+ *
+ * `envOverride` lets an operation run against a specific environment
+ * (Sandbox/Production) using THAT environment's stored config + credentials,
+ * regardless of which environment is currently saved as active. This is what
+ * lets the UI Test/Sync either environment on demand without re-saving.
+ */
 export async function buildContext(
   connector: Connector,
+  envOverride?: string | null,
 ): Promise<ConnectorContext> {
   const stored: Record<string, unknown> = connector.secretsEnc
     ? decryptJson(connector.secretsEnc)
     : {};
-  // Flatten the active environment's config (base URL, paths, ...) and resolve
-  // that environment's secrets.
-  const config = getEnvConfig((connector.config as Record<string, unknown>) ?? {});
+  const storedConfig = (connector.config as Record<string, unknown>) ?? {};
+  // When overriding, resolve config/secrets for the requested environment.
+  const effectiveStored =
+    envOverride && storedConfig.environment !== undefined
+      ? { ...storedConfig, environment: envOverride }
+      : storedConfig;
+  const config = getEnvConfig(effectiveStored);
   const secrets = getEnvSecrets(stored, config);
 
   return {
@@ -63,10 +75,11 @@ async function requireConnector(type: ConnectorType): Promise<Connector> {
  */
 export async function runTestConnection(
   type: ConnectorType,
+  envOverride?: string | null,
 ): Promise<ConnectorTestResult> {
   const def = getConnectorDefinition(type);
   const connector = await requireConnector(type);
-  const ctx = await buildContext(connector);
+  const ctx = await buildContext(connector, envOverride);
 
   // Fail visibly if required configuration/credentials are missing.
   const missing = def.validateReadiness(ctx.config, ctx.secrets);
@@ -109,10 +122,11 @@ export async function runSync(
   type: ConnectorType,
   trigger: "manual" | "cron" | "test",
   startedById?: string | null,
+  envOverride?: string | null,
 ): Promise<ConnectorSyncResult> {
   const def = getConnectorDefinition(type);
   const connector = await requireConnector(type);
-  const ctx = await buildContext(connector);
+  const ctx = await buildContext(connector, envOverride);
 
   const missing = def.validateReadiness(ctx.config, ctx.secrets);
   if (missing.length > 0) {

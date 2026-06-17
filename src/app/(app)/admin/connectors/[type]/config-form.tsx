@@ -209,26 +209,35 @@ export function ConnectorConfigForm({
       <div className="rounded-lg border bg-card p-6">
         <h3 className="text-sm font-semibold">Operations</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Test Connection and Sync Now run against the{" "}
-          <strong>saved</strong> environment
-          {view.envScoped && view.activeEnv
-            ? ` (${view.activeEnv.toUpperCase()})`
-            : ""}
-          .
+          {view.envScoped ? (
+            <>
+              Runs against the selected environment —{" "}
+              <strong
+                className={
+                  env === "production" ? "text-danger" : "text-warning"
+                }
+              >
+                {env ? env.toUpperCase() : "—"}
+              </strong>{" "}
+              — using its saved credentials. Flip the toggle above to switch; no
+              re-saving needed.
+            </>
+          ) : (
+            "Test Connection and Sync Now perform real calls against the live API."
+          )}
         </p>
         {view.envScoped && env !== view.activeEnv && (
-          <p className="mt-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
-            You&apos;re viewing <strong>{env.toUpperCase()}</strong> settings, but
-            operations still target the saved environment{" "}
-            <strong>{view.activeEnv.toUpperCase()}</strong>. Switch the toggle and
-            click <strong>Save configuration</strong> to operate on{" "}
-            {env.toUpperCase()}.
+          <p className="mt-2 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            If you just edited fields for <strong>{env.toUpperCase()}</strong>,
+            click <strong>Save configuration</strong> first — operations use the
+            last <em>saved</em> credentials for this environment.
           </p>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {canConfigure && (
             <form action={test} onSubmit={() => setOpsVisible(true)}>
               <input type="hidden" name="type" value={view.type} />
+              <input type="hidden" name="env" value={env} />
               <button
                 type="submit"
                 disabled={testing}
@@ -241,6 +250,7 @@ export function ConnectorConfigForm({
           {canSync && (
             <form action={sync} onSubmit={() => setOpsVisible(true)}>
               <input type="hidden" name="type" value={view.type} />
+              <input type="hidden" name="env" value={env} />
               <button
                 type="submit"
                 disabled={syncing}

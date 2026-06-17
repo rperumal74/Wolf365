@@ -30,6 +30,12 @@ async function savedEnv(type: ConnectorType): Promise<string | undefined> {
   return typeof env === "string" && env ? env : undefined;
 }
 
+/** The environment the operation should target, from the form's toggle. */
+function requestedEnv(formData: FormData): string | undefined {
+  const v = formData.get("env");
+  return typeof v === "string" && v ? v : undefined;
+}
+
 /** Prefix a message with a capitalized environment label, e.g. "Sandbox: …". */
 function withEnv(message: string, env?: string): string {
   if (!env) return message;
@@ -93,9 +99,10 @@ export async function testConnectionAction(
 ): Promise<ActionResult> {
   await requirePermission("connectors:configure");
   const type = parseType(formData.get("type"));
-  const env = await savedEnv(type);
+  // Target the toggled environment (falls back to saved for non-env connectors).
+  const env = requestedEnv(formData) ?? (await savedEnv(type));
   try {
-    const result = await runTestConnection(type);
+    const result = await runTestConnection(type, env);
     revalidatePath(`/admin/connectors/${type}`);
     return { ok: result.ok, message: withEnv(result.message, env), env };
   } catch (err) {
@@ -110,9 +117,9 @@ export async function syncNowAction(
 ): Promise<ActionResult> {
   const user = await requirePermission("connectors:sync");
   const type = parseType(formData.get("type"));
-  const env = await savedEnv(type);
+  const env = requestedEnv(formData) ?? (await savedEnv(type));
   try {
-    const result = await runSync(type, "manual", user.id);
+    const result = await runSync(type, "manual", user.id, env);
     await audit({
       action: "SYNC_RUN",
       actorId: user.id,
