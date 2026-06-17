@@ -35,18 +35,15 @@ export default async function AppLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className="flex w-64 shrink-0 flex-col border-r bg-card">
-        <div className="flex flex-col items-center gap-2 border-b px-4 py-4">
+      <aside className="flex w-72 shrink-0 flex-col border-r bg-card">
+        <div className="flex items-center justify-center border-b p-3">
           {/* Brand mark. Replace /public/Wolf365 Logo.png with your logo. */}
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/Wolf365 Logo.png"
-              alt="Wolf365 logo"
-              className="h-full w-full object-contain"
-            />
-          </div>
-          <span className="text-lg font-semibold tracking-tight">Wolf365</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/Wolf365 Logo.png"
+            alt="Wolf365 logo"
+            className="h-auto w-full object-contain"
+          />
         </div>
 
         <Sidebar items={visibleItems} />
