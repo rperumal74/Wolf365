@@ -36,7 +36,17 @@ export default async function AppLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="flex w-64 shrink-0 flex-col border-r bg-card">
-        <div className="flex h-14 items-center gap-2 border-b px-5">
+        <div className="flex h-14 items-center gap-2.5 border-b px-4">
+          {/* Square brand mark. Replace /public/logo.svg (or drop a logo.png and
+              update the src) with your logo; it fills this square box. */}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-card">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.svg"
+              alt="Wolf365 logo"
+              className="h-full w-full object-contain"
+            />
+          </div>
           <span className="text-lg font-semibold tracking-tight">Wolf365</span>
         </div>
 
