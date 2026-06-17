@@ -20,16 +20,16 @@ export default async function SignInPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-10 bg-muted px-4 py-12">
-      {/* Large brand hero — takes up most of the screen */}
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-muted px-4 py-8">
+      {/* Brand hero — sized to keep the sign-in button above the fold */}
       <div className="flex flex-col items-center text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/Wolf365 Logo.png"
           alt="Wolf365"
-          className="h-auto w-full max-w-2xl object-contain"
+          className="h-auto w-full max-w-md max-h-[40vh] object-contain"
         />
-        <p className="mt-4 text-base text-muted-foreground">
+        <p className="mt-3 text-base text-muted-foreground">
           Microsoft 365 billing reconciliation for MSPs
         </p>
       </div>
