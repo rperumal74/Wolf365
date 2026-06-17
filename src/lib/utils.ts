@@ -30,20 +30,23 @@ export function formatDateTime(
 ): string {
   if (!value) return "Never";
   const d = typeof value === "string" ? new Date(value) : value;
+  // NOTE: dateStyle/timeStyle cannot be combined with timeZoneName, so we use
+  // explicit component options to include the timezone abbreviation.
+  const opts: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  };
   try {
     return new Intl.DateTimeFormat("en-US", {
-      dateStyle: "medium",
-      timeStyle: "short",
+      ...opts,
       timeZone: timeZone || "UTC",
-      timeZoneName: "short",
     }).format(d);
   } catch {
     // Invalid timezone string — fall back to UTC.
-    return new Intl.DateTimeFormat("en-US", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: "UTC",
-      timeZoneName: "short",
-    }).format(d);
+    return new Intl.DateTimeFormat("en-US", { ...opts, timeZone: "UTC" }).format(d);
   }
 }
