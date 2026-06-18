@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { Bug } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
@@ -29,7 +30,7 @@ export default async function DebugLogsPage() {
             description="Connector API calls (test connection, sync) will be logged here with timing, status, and safe error details."
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border">
+          <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
                 <tr>
@@ -45,49 +46,57 @@ export default async function DebugLogsPage() {
               </thead>
               <tbody>
                 {logs.map((l) => (
-                  <tr key={l.id} className="border-t align-top">
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                      {formatDateTime(l.createdAt, user.timezone)}
-                    </td>
-                    <td className="px-3 py-2">{l.type.replaceAll("_", " ")}</td>
-                    <td className="px-3 py-2">
-                      {l.environment ? (
+                  <Fragment key={l.id}>
+                    <tr className="border-t align-top">
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                        {formatDateTime(l.createdAt, user.timezone)}
+                      </td>
+                      <td className="px-3 py-2">{l.type.replaceAll("_", " ")}</td>
+                      <td className="px-3 py-2">
+                        {l.environment ? (
+                          <span
+                            className={
+                              l.environment === "production"
+                                ? "font-medium text-danger"
+                                : "text-warning"
+                            }
+                          >
+                            {l.environment}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-3 py-2">{l.action}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                        {l.endpoint ?? "—"}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">{l.httpStatus ?? "—"}</td>
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                        {l.durationMs != null ? `${l.durationMs} ms` : "—"}
+                      </td>
+                      <td className="px-3 py-2">
                         <span
                           className={
-                            l.environment === "production"
-                              ? "font-medium text-danger"
-                              : "text-warning"
+                            l.outcome === "success" ? "text-success" : "text-danger"
                           }
                         >
-                          {l.environment}
+                          {l.outcome}
                         </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{l.action}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {l.endpoint ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 tabular-nums">{l.httpStatus ?? "—"}</td>
-                    <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                      {l.durationMs != null ? `${l.durationMs} ms` : "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={
-                          l.outcome === "success" ? "text-success" : "text-danger"
-                        }
-                      >
-                        {l.outcome}
-                      </span>
-                      {l.message && (
-                        <p className="mt-0.5 max-w-md whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                      </td>
+                    </tr>
+                    {l.message && (
+                      <tr>
+                        <td />
+                        <td
+                          colSpan={7}
+                          className="whitespace-pre-wrap break-words px-3 pb-2 text-xs text-muted-foreground"
+                        >
                           {l.message}
-                        </p>
-                      )}
-                    </td>
-                  </tr>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
