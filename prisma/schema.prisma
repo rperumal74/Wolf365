@@ -274,6 +274,7 @@ model Client {
 
   billingRuns BillingRun[]
   exceptions  Exception[]
+  superOpsInvoices SuperOpsInvoice[]
 
   @@index([name])
 }
@@ -386,6 +387,54 @@ model SuperOpsClient {
   name       String
   raw        Json?
   lastSyncedAt DateTime @default(now())
+}
+
+// SuperOps invoice imported for review + push to QuickBooks. This is a SEPARATE
+// billing pipeline from the M365/TD SYNNEX agreement billing (BillingRun).
+model SuperOpsInvoice {
+  id                 String    @id @default(cuid())
+  superOpsId         String    @unique
+  clientId           String?
+  client             Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  superOpsClientName String?
+  invoiceNumber      String?
+  status             String? // SuperOps-side invoice status
+  invoiceDate        DateTime?
+  dueDate            DateTime?
+  currency           String?
+  subtotal           Decimal?  @db.Decimal(18, 4)
+  tax                Decimal?  @db.Decimal(18, 4)
+  total              Decimal?  @db.Decimal(18, 4)
+  raw                Json?
+  lastSyncedAt       DateTime  @default(now())
+
+  // Wolf365 review/push workflow.
+  reviewStatus String    @default("PENDING") // PENDING | REVIEWED | PUSHED | SKIPPED
+  qboInvoiceId String?
+  pushedAt     DateTime?
+  pushError    String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines SuperOpsInvoiceLine[]
+
+  @@index([reviewStatus])
+  @@index([clientId])
+}
+
+model SuperOpsInvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     SuperOpsInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal @db.Decimal(18, 4)
+  unitPrice   Decimal @db.Decimal(18, 4)
+  amount      Decimal @db.Decimal(18, 4)
+  qboItemId   String?
+  raw         Json?
+
+  @@index([invoiceId])
 }
 
 // ---------------------------------------------------------------------------

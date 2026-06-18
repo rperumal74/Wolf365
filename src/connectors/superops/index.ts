@@ -20,9 +20,54 @@ import type {
 interface SuperOpsConfig {
   subdomain?: string;
   dataCenter?: "us" | "eu";
+  /** Default QBO item id used for invoice lines when pushing to QuickBooks. */
+  defaultQboItemId?: string;
+  /** Optional override GraphQL query for fetching invoices (advanced). */
+  invoicesQuery?: string;
 }
 interface SuperOpsSecrets {
   apiToken?: string;
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === "object" && !Array.isArray(v);
+
+/** First array-of-objects found in a GraphQL result (top level or one deep). */
+function firstObjectArray(obj: unknown): Record<string, unknown>[] | null {
+  if (!isObj(obj)) return null;
+  for (const v of Object.values(obj)) {
+    if (Array.isArray(v) && v.length > 0 && isObj(v[0])) {
+      return v as Record<string, unknown>[];
+    }
+  }
+  for (const v of Object.values(obj)) {
+    const nested = firstObjectArray(v);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function pick(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v;
+    if (typeof v === "number") return String(v);
+  }
+  return null;
+}
+function pickNum(obj: Record<string, unknown>, keys: string[]): number | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v))) return Number(v);
+  }
+  return null;
+}
+function pickDate(obj: Record<string, unknown>, keys: string[]): Date | null {
+  const v = pick(obj, keys);
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function superOpsEndpoint(dc: "us" | "eu" | undefined): string {
@@ -88,6 +133,24 @@ export const superOpsConnector: ConnectorDefinition<
         { value: "us", label: "United States (api.superops.ai)" },
         { value: "eu", label: "Europe (euapi.superops.ai)" },
       ],
+    },
+    {
+      key: "defaultQboItemId",
+      label: "Default QuickBooks item id (for pushing invoices)",
+      type: "text",
+      required: false,
+      secret: false,
+      helpText:
+        "QBO item id used for SuperOps invoice lines when pushing to QuickBooks (e.g. a 'Managed Services' service item).",
+    },
+    {
+      key: "invoicesQuery",
+      label: "Invoices GraphQL query (advanced, optional)",
+      type: "textarea",
+      required: false,
+      secret: false,
+      helpText:
+        "Override the default invoice query if your SuperOps schema differs. Leave blank to use the built-in query.",
     },
   ],
   secretFields: [
@@ -171,9 +234,154 @@ export const superOpsConnector: ConnectorDefinition<
       page += 1;
     }
 
-    return { imported, updated, skipped: 0, summary: { entity: "clients" } };
+    // Invoices (best-effort): import SuperOps invoices for the review/push
+    // workflow. A failure here does not abort client sync.
+    const invoiceResult = await syncSuperOpsInvoices(ctx);
+
+    return {
+      imported: imported + invoiceResult.imported,
+      updated: updated + invoiceResult.updated,
+      skipped: invoiceResult.skipped,
+      summary: {
+        clients: imported + updated,
+        invoices: invoiceResult.imported + invoiceResult.updated,
+        invoiceError: invoiceResult.error,
+      },
+    };
   },
 };
+
+/**
+ * Import SuperOps invoices defensively. The exact GraphQL schema varies by
+ * tenant, so we run a best-effort query (overridable in config), read the
+ * invoice + line arrays from wherever they appear, and map well-known field
+ * aliases. Errors are caught and reported in the summary (never abort clients).
+ */
+async function syncSuperOpsInvoices(
+  ctx: ConnectorContext<SuperOpsConfig, SuperOpsSecrets>,
+): Promise<{ imported: number; updated: number; skipped: number; error?: string }> {
+  let imported = 0;
+  let updated = 0;
+  let skipped = 0;
+  const query = ctx.config.invoicesQuery?.trim() || INVOICE_LIST_QUERY;
+
+  // Map SuperOps accountId -> Wolf365 clientId via stored SuperOps clients.
+  const soClients = await prisma.superOpsClient.findMany({
+    select: { superOpsId: true, clientId: true },
+  });
+  const clientByAccount = new Map(
+    soClients.map((c) => [c.superOpsId, c.clientId]),
+  );
+
+  let page = 1;
+  const pageSize = 100;
+  try {
+    for (;;) {
+      const res = await superOpsGraphQL(ctx, "sync_invoices", query, {
+        input: { page, pageSize },
+      });
+      if (!res.ok) {
+        return {
+          imported,
+          updated,
+          skipped,
+          error: `SuperOps invoice query failed (HTTP ${res.status})`,
+        };
+      }
+      const invoices = firstObjectArray(res.data) ?? [];
+      if (invoices.length === 0) break;
+
+      for (const inv of invoices) {
+        const result = await upsertSuperOpsInvoice(inv, clientByAccount);
+        if (result === "created") imported += 1;
+        else if (result === "updated") updated += 1;
+        else skipped += 1;
+      }
+      if (invoices.length < pageSize) break;
+      page += 1;
+    }
+  } catch (err) {
+    return {
+      imported,
+      updated,
+      skipped,
+      error: err instanceof Error ? err.message : "invoice sync error",
+    };
+  }
+  return { imported, updated, skipped };
+}
+
+async function upsertSuperOpsInvoice(
+  inv: Record<string, unknown>,
+  clientByAccount: Map<string, string | null>,
+): Promise<"created" | "updated" | "skipped"> {
+  const superOpsId = pick(inv, ["invoiceId", "id", "displayId", "invoiceNumber"]);
+  if (!superOpsId) return "skipped";
+
+  const accountId = isObj(inv.client)
+    ? pick(inv.client, ["accountId", "id"])
+    : pick(inv, ["accountId", "clientId"]);
+  const clientName = isObj(inv.client)
+    ? pick(inv.client, ["name", "companyName"])
+    : pick(inv, ["clientName", "companyName"]);
+  const clientId = accountId ? (clientByAccount.get(accountId) ?? null) : null;
+
+  // Find the line-item array within the invoice object.
+  const rawLines =
+    (["items", "lineItems", "lines", "invoiceItems"]
+      .map((k) => (Array.isArray(inv[k]) ? (inv[k] as Record<string, unknown>[]) : null))
+      .find(Boolean)) ?? firstObjectArray(inv) ?? [];
+
+  const lines = rawLines.map((l) => {
+    const quantity = pickNum(l, ["quantity", "qty", "units"]) ?? 1;
+    const unitPrice = pickNum(l, ["unitPrice", "rate", "price"]) ?? 0;
+    const amount =
+      pickNum(l, ["amount", "total", "lineTotal"]) ?? quantity * unitPrice;
+    return {
+      description:
+        pick(l, ["itemName", "description", "name", "productName"]) ?? "Item",
+      quantity,
+      unitPrice,
+      amount,
+      raw: l as unknown as Prisma.InputJsonValue,
+    };
+  });
+
+  const data = {
+    clientId,
+    superOpsClientName: clientName,
+    invoiceNumber: pick(inv, ["displayId", "invoiceNumber", "number"]),
+    status: pick(inv, ["statusEnum", "status", "state"]),
+    invoiceDate: pickDate(inv, ["invoiceDate", "date", "createdTime", "generatedDate"]),
+    dueDate: pickDate(inv, ["dueDate", "paymentDueDate"]),
+    currency: pick(inv, ["currency", "currencyCode"]),
+    subtotal: pickNum(inv, ["subTotalAmount", "subtotal", "subTotal"]),
+    tax: pickNum(inv, ["taxAmount", "tax", "totalTax"]),
+    total: pickNum(inv, ["totalAmount", "total", "grandTotal", "amount"]),
+    raw: inv as unknown as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+
+  const existing = await prisma.superOpsInvoice.findUnique({
+    where: { superOpsId },
+  });
+  if (existing) {
+    // Replace lines wholesale to reflect the latest SuperOps state, but keep
+    // the Wolf365 review/push status.
+    await prisma.$transaction([
+      prisma.superOpsInvoiceLine.deleteMany({ where: { invoiceId: existing.id } }),
+      prisma.superOpsInvoice.update({
+        where: { superOpsId },
+        data: { ...data, lines: { create: lines } },
+      }),
+    ]);
+    return "updated";
+  }
+  await prisma.superOpsInvoice.create({
+    data: { superOpsId, ...data, lines: { create: lines } },
+  });
+  return "created";
+}
 
 interface SuperOpsClientRaw {
   accountId: string;
@@ -186,6 +394,28 @@ const CLIENT_LIST_QUERY = `
 query getClientList($input: ListInfoInput!) {
   getClientList(input: $input) {
     clients { accountId name }
+    listInfo { totalCount }
+  }
+}`;
+
+// Best-effort invoice query. SuperOps' invoice schema varies by tenant; if this
+// doesn't match, override it via the connector's "Invoices GraphQL query" field
+// and the defensive parser will still extract invoices/lines from the result.
+const INVOICE_LIST_QUERY = `
+query getInvoiceList($input: ListInfoInput!) {
+  getInvoiceList(input: $input) {
+    invoices {
+      invoiceId
+      displayId
+      statusEnum
+      invoiceDate
+      dueDate
+      client { accountId name }
+      subTotalAmount
+      taxAmount
+      totalAmount
+      items { itemName quantity unitPrice amount }
+    }
     listInfo { totalCount }
   }
 }`;

@@ -15,6 +15,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/", icon: "LayoutDashboard", section: "Workspace" },
   { label: "Clients", href: "/clients", icon: "Building2", section: "Workspace", permission: "clients:read" },
   { label: "Billing Runs", href: "/billing", icon: "Receipt", section: "Workspace", permission: "billing:read" },
+  { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Workspace", permission: "billing:read" },
   { label: "Mappings", href: "/mappings", icon: "GitMerge", section: "Reconciliation", permission: "mappings:read" },
   { label: "Exceptions", href: "/exceptions", icon: "TriangleAlert", section: "Reconciliation", permission: "reports:read" },
   { label: "Reports", href: "/reports", icon: "BarChart3", section: "Reconciliation", permission: "reports:read" },
