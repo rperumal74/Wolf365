@@ -193,26 +193,41 @@ export const tdSynnexConnector: ConnectorDefinition<
 
     // Subscriptions are optional; only sync if the path is configured.
     let subCount = 0;
+    let subErrors = 0;
     const subsPath = ctx.config.subscriptionsPath;
     if (subsPath) {
       const perCustomer = /\{customerNo\}|\{customerId\}/.test(subsPath);
       if (perCustomer) {
         // The subscriptions endpoint is per-customer (…/customers/{customerNo}
-        // /subscriptions). Loop over synced customers, substituting the id.
+        // /subscriptions). Fetch in parallel with a concurrency cap so a large
+        // customer base completes well within the serverless time limit.
         const stored = await prisma.tdSynnexCustomer.findMany();
-        for (const cust of stored) {
-          const path = fillPath(subsPath, {
-            accountId: ctx.config.accountId,
-            customerNo: cust.stellrId,
-            customerId: cust.stellrId,
-          });
-          const subs = await fetchJsonList(ctx, path, "sync_subscriptions");
-          for (const raw of subs) {
-            const ok = await upsertTdSubscription(raw, cust.id);
-            if (ok) subCount += 1;
-            else skipped += 1;
+        const CONCURRENCY = 6;
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < stored.length) {
+            const cust = stored[cursor++]!;
+            const path = fillPath(subsPath, {
+              accountId: ctx.config.accountId,
+              customerNo: cust.stellrId,
+              customerId: cust.stellrId,
+            });
+            try {
+              const subs = await fetchJsonList(ctx, path, "sync_subscriptions");
+              for (const raw of subs) {
+                const ok = await upsertTdSubscription(raw, cust.id);
+                if (ok) subCount += 1;
+                else skipped += 1;
+              }
+            } catch {
+              // Isolate per-customer failures so one bad call doesn't abort all.
+              subErrors += 1;
+            }
           }
-        }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(CONCURRENCY, stored.length) }, worker),
+        );
       } else {
         const subs = await fetchJsonList(ctx, subsPath, "sync_subscriptions");
         for (const raw of subs) {
@@ -227,7 +242,11 @@ export const tdSynnexConnector: ConnectorDefinition<
       imported,
       updated,
       skipped,
-      summary: { customers: customers.length, subscriptions: subCount },
+      summary: {
+        customers: customers.length,
+        subscriptions: subCount,
+        subscriptionErrors: subErrors,
+      },
     };
   },
 };

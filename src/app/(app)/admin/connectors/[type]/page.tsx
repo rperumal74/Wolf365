@@ -11,9 +11,12 @@ import { ConnectorConfigForm } from "./config-form";
 import {
   saveConnectorAction,
   testConnectionAction,
-  syncNowAction,
-  toggleConnectorAction,
+  syncNowAction,  toggleConnectorAction,
 } from "../actions";
+
+// Manual Sync Now runs as a server action on this route; allow up to 5 minutes
+// for connectors that make many per-record API calls (capped lower on Hobby).
+export const maxDuration = 300;
 
 const VALID_TYPES: ConnectorType[] = [
   "TD_SYNNEX_STELLR",
