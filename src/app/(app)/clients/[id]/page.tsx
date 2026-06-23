@@ -4,7 +4,7 @@ import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
-import { formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime } from "@/lib/utils";
 import {
   detectDiscrepancies,
   type AddressLike,
@@ -169,44 +169,66 @@ export default async function ClientProfilePage({
           </div>
         )}
 
-        {/* Subscriptions */}
-        {td && td.subscriptions.length > 0 && (
+        {/* Licensing / subscriptions — always shown when a TD SYNNEX record is
+            linked, with an honest empty state. */}
+        {td && (
           <Card>
-            <h2 className="mb-3 text-sm font-semibold">Microsoft 365 subscriptions</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="py-1 pr-4 font-medium">SKU</th>
-                    <th className="py-1 pr-4 font-medium">Product</th>
-                    <th className="py-1 pr-4 font-medium">Qty</th>
-                    <th className="py-1 pr-4 font-medium">Term</th>
-                    <th className="py-1 pr-4 font-medium">Renewal</th>
-                    <th className="py-1 pr-4 font-medium">Reducible</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {td.subscriptions.map((s) => (
-                    <tr key={s.id} className="border-t">
-                      <td className="py-1.5 pr-4 font-mono text-xs">{s.productSku ?? "—"}</td>
-                      <td className="py-1.5 pr-4">{s.productName ?? "—"}</td>
-                      <td className="py-1.5 pr-4 tabular-nums">{s.quantity}</td>
-                      <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
-                      <td className="py-1.5 pr-4">{formatDateTime(s.renewalDate)}</td>
-                      <td className="py-1.5 pr-4">
-                        {s.reducible === false ? (
-                          <span className="text-warning">NCE locked</span>
-                        ) : s.reducible === true ? (
-                          "Yes"
-                        ) : (
-                          "—"
-                        )}
-                      </td>
+            <h2 className="mb-3 text-sm font-semibold">
+              Microsoft 365 licensing ({td.subscriptions.length})
+            </h2>
+            {td.subscriptions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No subscriptions synced for this customer. Run a TD SYNNEX sync,
+                or this customer may have no active TD SYNNEX subscriptions.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="py-1 pr-4 font-medium">SKU</th>
+                      <th className="py-1 pr-4 font-medium">Product</th>
+                      <th className="py-1 pr-4 font-medium">Qty</th>
+                      <th className="py-1 pr-4 font-medium">Cost</th>
+                      <th className="py-1 pr-4 font-medium">Cust. price</th>
+                      <th className="py-1 pr-4 font-medium">Term</th>
+                      <th className="py-1 pr-4 font-medium">Billing</th>
+                      <th className="py-1 pr-4 font-medium">Renewal</th>
+                      <th className="py-1 pr-4 font-medium">Status</th>
+                      <th className="py-1 pr-4 font-medium">Reducible</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {td.subscriptions.map((s) => (
+                      <tr key={s.id} className="border-t align-top">
+                        <td className="py-1.5 pr-4 font-mono text-xs">{s.productSku ?? "—"}</td>
+                        <td className="py-1.5 pr-4">{s.productName ?? "—"}</td>
+                        <td className="py-1.5 pr-4 tabular-nums">{s.quantity}</td>
+                        <td className="py-1.5 pr-4 tabular-nums">
+                          {s.unitCost != null ? formatCurrency(Number(s.unitCost), s.currency ?? "CAD") : "—"}
+                        </td>
+                        <td className="py-1.5 pr-4 tabular-nums">
+                          {s.customerPrice != null ? formatCurrency(Number(s.customerPrice), s.currency ?? "CAD") : "—"}
+                        </td>
+                        <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
+                        <td className="py-1.5 pr-4">{s.billingFrequency ?? "—"}</td>
+                        <td className="py-1.5 pr-4">{formatDateTime(s.renewalDate)}</td>
+                        <td className="py-1.5 pr-4">{s.status ?? "—"}</td>
+                        <td className="py-1.5 pr-4">
+                          {s.reducible === false ? (
+                            <span className="text-warning">NCE locked</span>
+                          ) : s.reducible === true ? (
+                            "Yes"
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         )}
       </div>
