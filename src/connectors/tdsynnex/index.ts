@@ -441,9 +441,7 @@ async function upsertTdCustomer(
     name,
     domain: pick(raw, ["domain", "defaultDomain", "primaryDomain"]),
     microsoftTenantId: pick(raw, ["microsoftTenantId", "tenantId", "msTenantId"]),
-    serviceAddress: (raw.address ?? raw.serviceAddress ?? undefined) as
-      | Prisma.InputJsonValue
-      | undefined,
+    serviceAddress: buildAddress(raw),
     active: deriveActive(raw),
     raw: raw as Prisma.InputJsonValue,
     lastSyncedAt: new Date(),
@@ -511,7 +509,35 @@ function deriveActive(raw: Record<string, unknown>): boolean {
   if (typeof raw.active === "boolean") return raw.active;
   const status = pick(raw, ["status", "state"])?.toLowerCase();
   if (!status) return true;
-  return !["inactive", "suspended", "cancelled", "canceled", "disabled"].includes(status);
+  return !["inactive", "suspended", "cancelled", "canceled", "disabled", "discontinued"].includes(
+    status,
+  );
+}
+
+/**
+ * Build a normalized service address from either a nested address object or
+ * the flat address fields Stellr returns (address1, city, state, zipCode, ...).
+ */
+function buildAddress(
+  raw: Record<string, unknown>,
+): Prisma.InputJsonValue | undefined {
+  if (raw.address && typeof raw.address === "object") {
+    return raw.address as Prisma.InputJsonValue;
+  }
+  if (raw.serviceAddress && typeof raw.serviceAddress === "object") {
+    return raw.serviceAddress as Prisma.InputJsonValue;
+  }
+  const line1 = pick(raw, ["address1", "addressLine1", "street"]);
+  const city = pick(raw, ["city"]);
+  if (!line1 && !city) return undefined;
+  return {
+    line1: line1 ?? "",
+    line2: pick(raw, ["address2", "addressLine2"]) ?? "",
+    city: city ?? "",
+    region: pick(raw, ["state", "province", "region"]) ?? "",
+    postalCode: pick(raw, ["zipCode", "postalCode", "zip"]) ?? "",
+    country: pick(raw, ["country", "countryCode"]) ?? "",
+  } as Prisma.InputJsonValue;
 }
 
 function parseDate(raw: Record<string, unknown>, keys: string[]): Date | null {
