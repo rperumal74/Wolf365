@@ -4,15 +4,13 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
-import { computeForecast, type Bucket } from "@/lib/crm/forecast";
+import { computeForecast, forecastGrid } from "@/lib/crm/forecast";
 import {
   CRM_LINES,
   CRM_LINE_ORDER,
   STAGE_ORDER,
   STAGE_LABELS,
-  FORECAST_CATEGORY_LABELS,
 } from "@/lib/crm/constants";
-import type { CrmForecastCategory } from "@prisma/client";
 
 /** Horizontal bar relative to a max, with a value label. */
 function Bar({
@@ -78,24 +76,16 @@ export default async function ForecastPage() {
       0,
     );
 
-  const f = computeForecast(
-    opps.map((o) => ({
-      line: o.line,
-      stage: o.stage,
-      amount: o.amount ? Number(o.amount) : 0,
-      marginAmount: o.marginAmount ? Number(o.marginAmount) : 0,
-      probability: o.probability,
-      closeMonth: o.closeDate.toISOString().slice(0, 7),
-    })),
-  );
-
-  // Forecast category rollup (open + closed) for the commit/best-case view.
-  const byCategory: Record<string, Bucket> = {};
-  for (const o of opps) {
-    const b = (byCategory[o.forecastCategory] ??= { count: 0, amount: 0, weighted: 0 });
-    b.count += 1;
-    b.amount += o.amount ? Number(o.amount) : 0;
-  }
+  const inputs = opps.map((o) => ({
+    line: o.line,
+    stage: o.stage,
+    amount: o.amount ? Number(o.amount) : 0,
+    marginAmount: o.marginAmount ? Number(o.marginAmount) : 0,
+    probability: o.probability,
+    closeMonth: o.closeDate.toISOString().slice(0, 7),
+  }));
+  const f = computeForecast(inputs);
+  const grid = forecastGrid(inputs);
 
   const headline = [
     {
@@ -126,18 +116,6 @@ export default async function ForecastPage() {
 
   const lineMax = Math.max(1, ...CRM_LINE_ORDER.map((l) => f.byLine[l].amount));
   const stageMax = Math.max(1, ...STAGE_ORDER.map((s) => f.byStage[s].amount));
-  const monthMax = Math.max(1, ...f.byMonth.map((m) => m.amount));
-  const CATEGORY_ORDER: CrmForecastCategory[] = [
-    "COMMIT",
-    "BEST_CASE",
-    "PIPELINE",
-    "CLOSED",
-    "OMITTED",
-  ];
-  const catMax = Math.max(
-    1,
-    ...CATEGORY_ORDER.map((c) => byCategory[c]?.amount ?? 0),
-  );
 
   return (
     <div>
@@ -180,6 +158,46 @@ export default async function ForecastPage() {
               </p>
             </Card>
 
+            {/* Forecast sheet: months × cumulative categories */}
+            <Card>
+              <h2 className="mb-1 text-sm font-semibold">Forecast by month</h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                Closed = 100% (PO) · Commit = 99% (verbal) · Best Case = 75%+ ·
+                Open Pipeline = 0–74%. Closed/Commit/Best Case are cumulative.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Month</th>
+                      <th className="px-3 py-2 text-right font-medium">Closed Only</th>
+                      <th className="px-3 py-2 text-right font-medium">Commit Forecast</th>
+                      <th className="px-3 py-2 text-right font-medium">Best Case Forecast</th>
+                      <th className="px-3 py-2 text-right font-medium">Open Pipeline</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-y bg-muted/50 font-semibold">
+                      <td className="px-3 py-2">Total · {grid.rows.length} mo</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.closedOnly)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.commit)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.bestCase)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.openPipeline)}</td>
+                    </tr>
+                    {grid.rows.map((r) => (
+                      <tr key={r.month} className="border-t">
+                        <td className="px-3 py-2">{monthLabel(r.month)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.closedOnly)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.commit)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.bestCase)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.openPipeline)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card>
                 <h2 className="mb-4 text-sm font-semibold">Pipeline by line of business</h2>
@@ -215,41 +233,6 @@ export default async function ForecastPage() {
                 </div>
               </Card>
 
-              <Card>
-                <h2 className="mb-4 text-sm font-semibold">Open pipeline by close month</h2>
-                {f.byMonth.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No open opportunities with a close date.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {f.byMonth.map((m) => (
-                      <Bar
-                        key={m.month}
-                        label={monthLabel(m.month)}
-                        amount={m.amount}
-                        max={monthMax}
-                        sub={`${m.count}`}
-                      />
-                    ))}
-                  </div>
-                )}
-              </Card>
-
-              <Card>
-                <h2 className="mb-4 text-sm font-semibold">By forecast category</h2>
-                <div className="space-y-3">
-                  {CATEGORY_ORDER.map((c) => (
-                    <Bar
-                      key={c}
-                      label={FORECAST_CATEGORY_LABELS[c]}
-                      amount={byCategory[c]?.amount ?? 0}
-                      max={catMax}
-                      sub={`${byCategory[c]?.count ?? 0}`}
-                    />
-                  ))}
-                </div>
-              </Card>
             </div>
           </>
         )}

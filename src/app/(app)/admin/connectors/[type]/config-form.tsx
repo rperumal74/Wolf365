@@ -60,7 +60,11 @@ export function ConnectorConfigForm({
   const seed = (e: string): Record<string, string> => {
     const cfg = view.envScoped ? (view.envConfig[e] ?? {}) : view.configValues;
     const out: Record<string, string> = {};
-    for (const f of otherFields) out[f.key] = str(cfg[f.key]);
+    for (const f of otherFields) {
+      const stored = str(cfg[f.key]);
+      // Pre-fill a field's default for a brand-new connector (no saved value).
+      out[f.key] = stored !== "" ? stored : (f.default ?? "");
+    }
     return out;
   };
   const [values, setValues] = useState<Record<string, string>>(seed(view.activeEnv));

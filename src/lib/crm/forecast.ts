@@ -1,5 +1,5 @@
 import type { CrmLine, CrmStage } from "@prisma/client";
-import { isOpenStage } from "./constants";
+import { isOpenStage, COMMIT_THRESHOLD, BEST_CASE_THRESHOLD } from "./constants";
 
 /**
  * Pure sales-forecast math. Dependency-free and unit-tested. Callers map Prisma
@@ -131,6 +131,102 @@ export function computeForecast(
       .sort()
       .map((month) => ({ month, ...tidy(byMonth[month] ?? emptyBucket()) })),
   };
+}
+
+/**
+ * Forecast grid mirroring the classic sales sheet: one row per close month with
+ * cumulative roll-up columns, plus a totals row.
+ *
+ *   Closed Only        = won (PO received)
+ *   Commit Forecast    = Closed + Commit (99%, verbal commitment)
+ *   Best Case Forecast = Closed + Commit + Best Case (75%+)
+ *   Open Pipeline      = the rest of the open funnel (0–74%)
+ *
+ * Closed Lost / Omitted are excluded. Months between the earliest and latest
+ * are filled (up to a cap) so it reads like a schedule.
+ */
+export interface ForecastGridRow {
+  month: string;
+  closedOnly: number;
+  commit: number;
+  bestCase: number;
+  openPipeline: number;
+}
+
+const MAX_GRID_MONTHS = 24;
+
+function nextMonth(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(Date.UTC(y!, (m! - 1) + 1, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export function forecastGrid(opps: ForecastOpportunityInput[]): {
+  rows: ForecastGridRow[];
+  total: ForecastGridRow;
+} {
+  // Raw per-month category buckets (non-cumulative).
+  const raw: Record<
+    string,
+    { closed: number; commit: number; best: number; pipeline: number }
+  > = {};
+
+  for (const o of opps) {
+    if (o.stage === "CLOSED_LOST") continue;
+    const amount = o.amount || 0;
+    const bucket = (raw[o.closeMonth] ??= {
+      closed: 0,
+      commit: 0,
+      best: 0,
+      pipeline: 0,
+    });
+    if (o.stage === "CLOSED_WON") bucket.closed += amount;
+    else if (o.probability >= COMMIT_THRESHOLD) bucket.commit += amount;
+    else if (o.probability >= BEST_CASE_THRESHOLD) bucket.best += amount;
+    else bucket.pipeline += amount;
+  }
+
+  const present = Object.keys(raw).sort();
+  let months = present;
+  // Fill contiguous months between first and last (capped) for a schedule feel.
+  if (present.length > 1) {
+    const filled: string[] = [];
+    let cur = present[0]!;
+    const last = present[present.length - 1]!;
+    while (cur <= last && filled.length < MAX_GRID_MONTHS) {
+      filled.push(cur);
+      cur = nextMonth(cur);
+    }
+    months = filled.includes(last) ? filled : present;
+  }
+
+  const rows: ForecastGridRow[] = months.map((month) => {
+    const b = raw[month] ?? { closed: 0, commit: 0, best: 0, pipeline: 0 };
+    return {
+      month,
+      closedOnly: round2(b.closed),
+      commit: round2(b.closed + b.commit),
+      bestCase: round2(b.closed + b.commit + b.best),
+      openPipeline: round2(b.pipeline),
+    };
+  });
+
+  const total = rows.reduce<ForecastGridRow>(
+    (t, r) => ({
+      month: "",
+      closedOnly: t.closedOnly + r.closedOnly,
+      commit: t.commit + r.commit,
+      bestCase: t.bestCase + r.bestCase,
+      openPipeline: t.openPipeline + r.openPipeline,
+    }),
+    { month: "", closedOnly: 0, commit: 0, bestCase: 0, openPipeline: 0 },
+  );
+  total.closedOnly = round2(total.closedOnly);
+  total.commit = round2(total.commit);
+  total.bestCase = round2(total.bestCase);
+  total.openPipeline = round2(total.openPipeline);
+
+  return { rows, total };
 }
 
 /** Margin % = marginAmount / amount × 100. 0 when amount is 0/absent. */

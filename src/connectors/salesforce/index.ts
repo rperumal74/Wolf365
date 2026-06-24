@@ -1,4 +1,4 @@
-import { CrmLine, CrmStage, CrmForecastCategory, CrmOpportunityType } from "@prisma/client";
+import { CrmLine, CrmStage, CrmOpportunityType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { connectorFetch } from "@/connectors/http";
 import { writeDebugLog } from "@/lib/debug-log";
@@ -8,7 +8,7 @@ import type {
   ConnectorSyncResult,
   ConnectorTestResult,
 } from "@/connectors/types";
-import { CRM_LINES, defaultForecastCategory } from "@/lib/crm/constants";
+import { CRM_LINES, forecastCategoryForProbability } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
 import { totalContractValue, commissionAmount } from "@/lib/crm/pricing";
 import {
@@ -52,6 +52,7 @@ export const salesforceConnector: ConnectorDefinition<
       required: false,
       secret: false,
       placeholder: "60.0",
+      default: "60.0",
       helpText: "Salesforce REST API version (default 60.0).",
     },
     {
@@ -73,9 +74,10 @@ export const salesforceConnector: ConnectorDefinition<
       type: "textarea",
       required: false,
       secret: false,
-      placeholder: "RecordType.Name = 'Managed Services'",
+      placeholder: "Revenue_Type__c = 'Managed Services'",
+      default: "Revenue_Type__c = 'Managed Services'",
       helpText:
-        "Optional SOQL WHERE clause to select which opportunities to import (no 'WHERE' keyword). Leave blank to import all. Example: Type = 'Managed Services' or RecordType.Name = 'Managed Services'.",
+        "SOQL WHERE clause selecting which opportunities to import (no 'WHERE' keyword). Pre-filled to match by Revenue Type = Managed Services — adjust the custom field's API name if yours differs (check Setup → Object Manager → Opportunity → Fields). Leave blank to import all.",
     },
     {
       key: "defaultOwnerEmail",
@@ -107,8 +109,9 @@ export const salesforceConnector: ConnectorDefinition<
         { value: "ANNUAL", label: "Annual (÷12 for MRR)" },
         { value: "TOTAL_CONTRACT", label: "Total contract value (÷ months in term)" },
       ],
+      default: "MONTHLY",
       helpText:
-        "How to interpret the Amount field so we can store the monthly value (MRR). Wolf365 derives TCV from MRR and the term.",
+        "How to interpret the Amount field so we can store the monthly value (MRR). Salesforce shows your deals monthly, so this is Monthly by default. Wolf365 derives TCV from MRR and the term.",
     },
     {
       key: "marginField",
@@ -139,6 +142,7 @@ export const salesforceConnector: ConnectorDefinition<
         { value: "2", label: "2 years" },
         { value: "3", label: "3 years" },
       ],
+      default: "1",
       helpText: "Used when no term field is configured (or it's empty).",
     },
   ],
@@ -229,7 +233,6 @@ export const salesforceConnector: ConnectorDefinition<
       "LeadSource",
       "NextStep",
       "Description",
-      "ForecastCategoryName",
       "IsClosed",
       "IsWon",
       "Owner.Email",
@@ -273,6 +276,7 @@ export const salesforceConnector: ConnectorDefinition<
         monthlyAmount != null ? commissionAmount(line, termYears, monthlyAmount) : null;
 
       const stage = mapStage(r);
+      const probability = clampPct(getNum(r, "Probability"), stage);
       const ownerId =
         userByEmail.get((getStr(r, "Owner.Email") ?? "").toLowerCase()) ??
         defaultOwner.id;
@@ -290,8 +294,8 @@ export const salesforceConnector: ConnectorDefinition<
         termYears,
         billingFrequency: "MONTHLY" as const,
         stage,
-        probability: clampPct(getNum(r, "Probability"), stage),
-        forecastCategory: mapForecastCategory(getStr(r, "ForecastCategoryName"), stage),
+        probability,
+        forecastCategory: forecastCategoryForProbability(stage, probability),
         closeDate: parseDate(getStr(r, "CloseDate")) ?? new Date(),
         type: mapType(getStr(r, "Type")),
         leadSource: getStr(r, "LeadSource"),
@@ -493,27 +497,6 @@ function mapStage(r: Record<string, unknown>): CrmStage {
   if (s.includes("propos") || s.includes("quote")) return "PROPOSAL";
   if (s.includes("qualif")) return "QUALIFICATION";
   return "PROSPECTING";
-}
-
-function mapForecastCategory(
-  name: string | null,
-  stage: CrmStage,
-): CrmForecastCategory {
-  switch ((name ?? "").toLowerCase()) {
-    case "pipeline":
-      return "PIPELINE";
-    case "best case":
-      return "BEST_CASE";
-    case "commit":
-    case "forecast":
-      return "COMMIT";
-    case "closed":
-      return "CLOSED";
-    case "omitted":
-      return "OMITTED";
-    default:
-      return defaultForecastCategory(stage);
-  }
 }
 
 function mapType(value: string | null): CrmOpportunityType | null {

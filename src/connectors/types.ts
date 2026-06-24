@@ -22,6 +22,8 @@ export interface ConnectorField {
   placeholder?: string;
   helpText?: string;
   options?: { value: string; label: string }[];
+  /** Default value pre-filled for a brand-new connector (non-secret fields). */
+  default?: string;
 }
 
 export interface ConnectorTestResult {

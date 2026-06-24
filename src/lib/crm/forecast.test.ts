@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   computeForecast,
+  forecastGrid,
   computeMarginPercentage,
   type ForecastOpportunityInput,
 } from "@/lib/crm/forecast";
@@ -59,6 +60,33 @@ describe("computeForecast", () => {
     expect(f.openAmount).toBe(0);
     expect(f.byMonth).toEqual([]);
     expect(f.byLine.MANAGED_SERVICES.count).toBe(0);
+  });
+});
+
+describe("forecastGrid", () => {
+  it("categorizes by probability and rolls up cumulatively per month", () => {
+    const { rows, total } = forecastGrid([
+      opp({ stage: "CLOSED_WON", amount: 1000, closeMonth: "2026-06" }), // closed
+      opp({ stage: "NEGOTIATION", probability: 99, amount: 500, closeMonth: "2026-06" }), // commit
+      opp({ stage: "PROPOSAL", probability: 80, amount: 200, closeMonth: "2026-06" }), // best case
+      opp({ stage: "PROSPECTING", probability: 20, amount: 700, closeMonth: "2026-06" }), // open pipeline
+      opp({ stage: "CLOSED_LOST", amount: 9000, closeMonth: "2026-06" }), // excluded
+    ]);
+    expect(rows).toHaveLength(1);
+    const r = rows[0]!;
+    expect(r.closedOnly).toBe(1000);
+    expect(r.commit).toBe(1500); // closed + commit
+    expect(r.bestCase).toBe(1700); // + best case
+    expect(r.openPipeline).toBe(700);
+    expect(total.bestCase).toBe(1700);
+  });
+
+  it("fills contiguous months between first and last", () => {
+    const { rows } = forecastGrid([
+      opp({ amount: 100, closeMonth: "2026-06", probability: 10 }),
+      opp({ amount: 100, closeMonth: "2026-09", probability: 10 }),
+    ]);
+    expect(rows.map((r) => r.month)).toEqual(["2026-06", "2026-07", "2026-08", "2026-09"]);
   });
 });
 

@@ -11,7 +11,7 @@ import {
   BILLING_FREQUENCY_LABELS,
   OPPORTUNITY_TYPE_LABELS,
   TERM_YEARS_OPTIONS,
-  defaultForecastCategory,
+  forecastCategoryForProbability,
 } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
 import {
@@ -101,12 +101,18 @@ export function OpportunityForm({
   const [monthlyMargin, setMonthlyMargin] = useState(values.monthlyMargin);
   const [termYears, setTermYears] = useState(values.termYears);
 
-  // When the stage changes, suggest the matching probability + forecast
-  // category (still editable afterwards).
+  // Stage and probability drive the forecast category (Closed / Commit / Best
+  // Case / Open Pipeline). Both are still editable afterwards.
   function onStageChange(next: keyof typeof STAGE_LABELS) {
+    const prob = STAGE_PROBABILITY[next];
     setStage(next);
-    setProbability(STAGE_PROBABILITY[next]);
-    setForecastCategory(defaultForecastCategory(next));
+    setProbability(prob);
+    setForecastCategory(forecastCategoryForProbability(next, prob));
+  }
+
+  function onProbabilityChange(prob: number) {
+    setProbability(prob);
+    setForecastCategory(forecastCategoryForProbability(stage, prob));
   }
 
   const mrr = Number(monthlyAmount) || 0;
@@ -285,14 +291,17 @@ export function OpportunityForm({
               required
             />
           </Field>
-          <Field label="Probability (%)" help="Defaults from stage; editable.">
+          <Field
+            label="Probability (%)"
+            help="100 = Closed (PO) · 99 = Commit · 75+ = Best Case · 0–74 = Open Pipeline."
+          >
             <input
               name="probability"
               type="number"
               min="0"
               max="100"
               value={probability}
-              onChange={(e) => setProbability(Number(e.target.value))}
+              onChange={(e) => onProbabilityChange(Number(e.target.value))}
               className={inputCls}
             />
           </Field>

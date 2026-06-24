@@ -100,19 +100,34 @@ export function isOpenStage(stage: CrmStage): boolean {
 }
 
 export const FORECAST_CATEGORY_LABELS: Record<CrmForecastCategory, string> = {
-  PIPELINE: "Pipeline",
+  PIPELINE: "Open Pipeline",
   BEST_CASE: "Best Case",
   COMMIT: "Commit",
   CLOSED: "Closed",
   OMITTED: "Omitted",
 };
 
-/** Default forecast category for a stage. */
-export function defaultForecastCategory(stage: CrmStage): CrmForecastCategory {
+/**
+ * Probability thresholds that define the forecast categories:
+ *   Closed     = won (PO received)        → 100%
+ *   Commit     = verbal commitment, no PO → 99%+
+ *   Best Case  = likely to close          → 75%+
+ *   Open Pipeline = the rest of the funnel → 0–74%
+ */
+export const COMMIT_THRESHOLD = 99;
+export const BEST_CASE_THRESHOLD = 75;
+
+/** Forecast category for an open deal's probability, or Closed/Omitted when the
+ *  deal is already won/lost. Matches the Closed / Commit / Best Case / Open
+ *  Pipeline methodology. */
+export function forecastCategoryForProbability(
+  stage: CrmStage,
+  probability: number,
+): CrmForecastCategory {
   if (stage === "CLOSED_WON") return "CLOSED";
   if (stage === "CLOSED_LOST") return "OMITTED";
-  if (stage === "NEGOTIATION") return "COMMIT";
-  if (stage === "PROPOSAL") return "BEST_CASE";
+  if (probability >= COMMIT_THRESHOLD) return "COMMIT";
+  if (probability >= BEST_CASE_THRESHOLD) return "BEST_CASE";
   return "PIPELINE";
 }
 
