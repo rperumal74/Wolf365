@@ -58,12 +58,15 @@ export interface SalesforceAuth {
 /**
  * Obtain a valid Salesforce access token + instance URL via client-credentials,
  * refreshing when missing/expired. Salesforce client-credentials tokens don't
- * report expires_in, so we cache for a conservative window and re-auth after.
+ * report expires_in, so we cache for a conservative window — but org session
+ * policies can expire them sooner, so callers also retry once on a 401 with
+ * `forceRefresh: true`.
  */
 export async function getSalesforceAuth(
   config: SalesforceConfig,
   secrets: SalesforceSecrets,
   save: (next: SalesforceSecrets) => Promise<void>,
+  forceRefresh = false,
 ): Promise<SalesforceAuth> {
   if (!config.loginUrl) {
     throw new Error(
@@ -76,6 +79,7 @@ export async function getSalesforceAuth(
 
   const skewMs = 120_000;
   if (
+    !forceRefresh &&
     secrets.accessToken &&
     secrets.instanceUrl &&
     secrets.accessTokenExpiresAt &&
@@ -118,8 +122,10 @@ export async function getSalesforceAuth(
     ...secrets,
     accessToken: token.access_token,
     instanceUrl: token.instance_url,
-    // Client-credentials tokens are short-lived; cache conservatively (1h).
-    accessTokenExpiresAt: Date.now() + 3_600_000,
+    // Client-credentials tokens are short-lived and the lifetime isn't reported.
+    // Cache optimistically (15m); a 401 mid-operation forces a refresh + retry,
+    // so correctness doesn't depend on this window matching the org's policy.
+    accessTokenExpiresAt: Date.now() + 900_000,
   };
   await save(next);
   return { accessToken: token.access_token, instanceUrl: token.instance_url };

@@ -181,7 +181,7 @@ export const salesforceConnector: ConnectorDefinition<
     // Real probe: count opportunities matching the configured filter.
     const where = (ctx.config.soqlFilter ?? "").trim();
     const soql = `SELECT COUNT() FROM Opportunity${where ? ` WHERE ${where}` : ""}`;
-    const { totalSize } = await runQuery(ctx, auth.instanceUrl, soql, "test_count");
+    const { totalSize } = await runQuery(ctx, soql, "test_count");
     return {
       ok: true,
       message: `Connected to Salesforce. ${totalSize} matching opportunit${totalSize === 1 ? "y" : "ies"} visible.`,
@@ -209,10 +209,6 @@ export const salesforceConnector: ConnectorDefinition<
       select: { id: true, email: true },
     });
     const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
-
-    const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
-      ctx.saveSecrets(next),
-    );
 
     const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
     const basis = ctx.config.amountBasis ?? "MONTHLY";
@@ -245,7 +241,7 @@ export const salesforceConnector: ConnectorDefinition<
       (where ? ` WHERE ${where}` : "") +
       ` ORDER BY CloseDate DESC`;
 
-    const records = await runQueryAll(ctx, auth.instanceUrl, soql, "import_opportunities");
+    const records = await runQueryAll(ctx, soql, "import_opportunities");
 
     let imported = 0;
     let updated = 0;
@@ -350,65 +346,77 @@ function apiVersion(ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>):
   return (ctx.config.apiVersion ?? "60.0").trim().replace(/^v/i, "") || "60.0";
 }
 
-/** Run a single SOQL query, returning the parsed first page. */
-async function runQuery(
+/**
+ * Perform an authenticated GET, retrying ONCE on 401 with a force-refreshed
+ * token. Salesforce client-credentials tokens can expire before our cache
+ * window (org session policy), so a 401 means "re-auth and try again", not
+ * "give up". `buildUrl` is given the (possibly refreshed) instance URL.
+ */
+async function authedGet(
   ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>,
-  instanceUrl: string,
-  soql: string,
+  buildUrl: (instanceUrl: string) => string,
   action: string,
-): Promise<QueryResponse> {
-  const url = `${instanceUrl.replace(/\/$/, "")}/services/data/v${apiVersion(ctx)}/query/?q=${encodeURIComponent(soql)}`;
-  const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
-    ctx.saveSecrets(next),
-  );
-  const res = await connectorFetch(url, {
+): Promise<string> {
+  const save = (next: SalesforceSecrets) => ctx.saveSecrets(next);
+  let auth = await getSalesforceAuth(ctx.config, ctx.secrets, save);
+  let res = await connectorFetch(buildUrl(auth.instanceUrl), {
     connectorType: "SALESFORCE",
     connectorId: ctx.connectorId,
     action,
-    headers: {
-      Authorization: `Bearer ${auth.accessToken}`,
-      Accept: "application/json",
-    },
+    headers: { Authorization: `Bearer ${auth.accessToken}`, Accept: "application/json" },
   });
+  if (res.status === 401) {
+    auth = await getSalesforceAuth(ctx.config, ctx.secrets, save, true);
+    res = await connectorFetch(buildUrl(auth.instanceUrl), {
+      connectorType: "SALESFORCE",
+      connectorId: ctx.connectorId,
+      action: `${action}_retry`,
+      headers: { Authorization: `Bearer ${auth.accessToken}`, Accept: "application/json" },
+    });
+  }
   if (!res.ok) {
     throw new Error(
-      `Salesforce query failed (HTTP ${res.status}). Check the filter/field names in your configuration.`,
+      `Salesforce request failed (HTTP ${res.status}). Check credentials, the Run-As user on the connected app, and the filter/field names.`,
     );
   }
-  return JSON.parse(res.body) as QueryResponse;
+  return res.body;
+}
+
+/** Run a single SOQL query, returning the parsed first page. */
+async function runQuery(
+  ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>,
+  soql: string,
+  action: string,
+): Promise<QueryResponse> {
+  const body = await authedGet(
+    ctx,
+    (instanceUrl) =>
+      `${instanceUrl.replace(/\/$/, "")}/services/data/v${apiVersion(ctx)}/query/?q=${encodeURIComponent(soql)}`,
+    action,
+  );
+  return JSON.parse(body) as QueryResponse;
 }
 
 /** Run a SOQL query and follow nextRecordsUrl until all records are collected. */
 async function runQueryAll(
   ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>,
-  instanceUrl: string,
   soql: string,
   action: string,
 ): Promise<Record<string, unknown>[]> {
-  const base = instanceUrl.replace(/\/$/, "");
   const all: Record<string, unknown>[] = [];
-  let page = await runQuery(ctx, instanceUrl, soql, action);
+  let page = await runQuery(ctx, soql, action);
   all.push(...page.records);
 
   let guard = 0;
   while (!page.done && page.nextRecordsUrl && guard < 1000) {
     guard += 1;
-    const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
-      ctx.saveSecrets(next),
+    const nextPath = page.nextRecordsUrl;
+    const body = await authedGet(
+      ctx,
+      (instanceUrl) => `${instanceUrl.replace(/\/$/, "")}${nextPath}`,
+      `${action}_page`,
     );
-    const res = await connectorFetch(`${base}${page.nextRecordsUrl}`, {
-      connectorType: "SALESFORCE",
-      connectorId: ctx.connectorId,
-      action: `${action}_page`,
-      headers: {
-        Authorization: `Bearer ${auth.accessToken}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) {
-      throw new Error(`Salesforce pagination failed (HTTP ${res.status}).`);
-    }
-    page = JSON.parse(res.body) as QueryResponse;
+    page = JSON.parse(body) as QueryResponse;
     all.push(...page.records);
   }
 
@@ -416,7 +424,6 @@ async function runQueryAll(
     type: "SALESFORCE",
     connectorId: ctx.connectorId,
     action: `${action}_parsed`,
-    endpoint: hostOf(base),
     recordsReturned: all.length,
     outcome: "success",
     error: `fetched ${all.length} opportunity record(s)`,
