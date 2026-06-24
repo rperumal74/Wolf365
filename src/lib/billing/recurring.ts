@@ -1,10 +1,10 @@
 /**
- * Recurring-revenue math for the dashboard.
+ * Recurring-revenue / cost / margin math for the dashboard and client profiles.
  *
- * MRR = sum of each subscription's monthly recurring revenue, using the
- * customer price × quantity. One-time charges and inactive/expired/cancelled
- * subscriptions are excluded; annually-billed lines are divided by 12 so they
- * contribute their monthly share. ARR is MRR × 12. Pure + unit-tested.
+ * MRR = sum of each subscription's monthly customer price × quantity. Cost uses
+ * the TD SYNNEX unit cost. One-time charges and inactive/expired/cancelled
+ * subscriptions are excluded; annually-billed lines contribute their monthly
+ * share (÷12). ARR = MRR × 12. Pure + unit-tested.
  */
 export interface RecurringSubscriptionInput {
   /** Vendor-suggested customer price (revenue). Falls back to unitCost. */
@@ -17,16 +17,32 @@ export interface RecurringSubscriptionInput {
 
 const INACTIVE = /expire|cancel|inactiv|suspend|discontinu/i;
 
-/** Monthly recurring revenue for one subscription (0 if one-time/inactive). */
-export function monthlyRevenue(sub: RecurringSubscriptionInput): number {
-  if (sub.status && INACTIVE.test(sub.status)) return 0;
+/** Whether a subscription counts toward recurring totals. */
+export function isRecurringActive(sub: RecurringSubscriptionInput): boolean {
+  if (sub.status && INACTIVE.test(sub.status)) return false;
   const freq = (sub.billingFrequency ?? "").toLowerCase();
-  if (freq.includes("one")) return 0; // one_time → not recurring
-  const unit = sub.customerPrice ?? sub.unitCost ?? 0;
-  const line = unit * sub.quantity;
-  // Annually-billed line → monthly share. Monthly/unknown → counted as-is.
+  if (freq.includes("one")) return false; // one_time → not recurring
+  return true;
+}
+
+/** Monthly amount for a unit price, applying the ÷12 share for annual billing. */
+function lineMonthly(unitPrice: number, sub: RecurringSubscriptionInput): number {
+  const line = unitPrice * sub.quantity;
+  const freq = (sub.billingFrequency ?? "").toLowerCase();
   if (freq.includes("ann") || freq.includes("year")) return line / 12;
   return line;
+}
+
+/** Monthly recurring revenue for one subscription (0 if one-time/inactive). */
+export function monthlyRevenue(sub: RecurringSubscriptionInput): number {
+  if (!isRecurringActive(sub)) return 0;
+  return lineMonthly(sub.customerPrice ?? sub.unitCost ?? 0, sub);
+}
+
+/** Monthly recurring cost for one subscription (0 if one-time/inactive). */
+export function monthlyCost(sub: RecurringSubscriptionInput): number {
+  if (!isRecurringActive(sub)) return 0;
+  return lineMonthly(sub.unitCost ?? 0, sub);
 }
 
 function round2(n: number): number {
@@ -39,4 +55,45 @@ export function computeMrr(subs: RecurringSubscriptionInput[]): number {
 
 export function computeArr(mrr: number): number {
   return round2(mrr * 12);
+}
+
+export interface RecurringSummary {
+  mrr: number;
+  arr: number;
+  monthlyCost: number;
+  annualCost: number;
+  monthlyMargin: number;
+  annualMargin: number;
+  /** Margin as a percentage of revenue (0 when there's no revenue). */
+  marginPct: number;
+  /** Count of subscriptions counted as active & recurring. */
+  activeCount: number;
+}
+
+/** Full recurring revenue/cost/margin rollup for a set of subscriptions. */
+export function recurringSummary(
+  subs: RecurringSubscriptionInput[],
+): RecurringSummary {
+  let mrr = 0;
+  let cost = 0;
+  let activeCount = 0;
+  for (const s of subs) {
+    if (!isRecurringActive(s)) continue;
+    activeCount += 1;
+    mrr += monthlyRevenue(s);
+    cost += monthlyCost(s);
+  }
+  mrr = round2(mrr);
+  cost = round2(cost);
+  const monthlyMargin = round2(mrr - cost);
+  return {
+    mrr,
+    arr: round2(mrr * 12),
+    monthlyCost: cost,
+    annualCost: round2(cost * 12),
+    monthlyMargin,
+    annualMargin: round2(monthlyMargin * 12),
+    marginPct: mrr > 0 ? Math.round((monthlyMargin / mrr) * 1000) / 10 : 0,
+    activeCount,
+  };
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { recurringSummary } from "@/lib/billing/recurring";
 import {
   detectDiscrepancies,
   type AddressLike,
@@ -50,6 +51,21 @@ export default async function ClientProfilePage({
 
   const qbo = client.qboCustomer;
   const td = client.tdSynnexCustomer;
+
+  // Per-client recurring totals from this customer's M365 licensing.
+  const recurring = td
+    ? recurringSummary(
+        td.subscriptions.map((s) => ({
+          customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
+          unitCost: s.unitCost != null ? Number(s.unitCost) : null,
+          quantity: s.quantity,
+          billingFrequency: s.billingFrequency,
+          status: s.status,
+        })),
+      )
+    : null;
+  const recurringCurrency =
+    td?.subscriptions.find((s) => s.currency)?.currency ?? "CAD";
 
   const discrepancies = detectDiscrepancies({
     qbo: qbo
@@ -150,6 +166,33 @@ export default async function ClientProfilePage({
             )}
           </Card>
         </div>
+
+        {/* Per-client recurring totals from M365 licensing */}
+        {recurring && recurring.activeCount > 0 && (
+          <Card>
+            <h2 className="mb-3 text-sm font-semibold">
+              Recurring totals ({recurring.activeCount} active)
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatItem
+                label="MRR"
+                value={formatCurrency(recurring.mrr, recurringCurrency)}
+              />
+              <StatItem
+                label="ARR"
+                value={formatCurrency(recurring.arr, recurringCurrency)}
+              />
+              <StatItem
+                label="Monthly cost"
+                value={formatCurrency(recurring.monthlyCost, recurringCurrency)}
+              />
+              <StatItem
+                label={`Monthly margin (${recurring.marginPct}%)`}
+                value={formatCurrency(recurring.monthlyMargin, recurringCurrency)}
+              />
+            </div>
+          </Card>
+        )}
 
         {/* Mapping boxes */}
         {(client.huduMatch || client.superOpsMatch) && (

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { monthlyRevenue, computeMrr, computeArr } from "@/lib/billing/recurring";
+import {
+  monthlyRevenue,
+  monthlyCost,
+  computeMrr,
+  computeArr,
+  recurringSummary,
+} from "@/lib/billing/recurring";
 
 const sub = (over: Partial<Parameters<typeof monthlyRevenue>[0]> = {}) => ({
   customerPrice: 10,
@@ -42,5 +48,35 @@ describe("recurring revenue", () => {
     ]);
     expect(mrr).toBeCloseTo(148.07, 2);
     expect(computeArr(mrr)).toBeCloseTo(1776.84, 2);
+  });
+});
+
+describe("recurring cost & margin", () => {
+  it("monthlyCost uses unitCost (0 if one-time/inactive)", () => {
+    expect(monthlyCost(sub({ unitCost: 8, quantity: 3 }))).toBe(24);
+    expect(monthlyCost(sub({ unitCost: 8, billingFrequency: "one_time" }))).toBe(0);
+    expect(monthlyCost(sub({ unitCost: 8, status: "Cancelled" }))).toBe(0);
+  });
+
+  it("recurringSummary rolls up revenue, cost, margin and active count", () => {
+    const s = recurringSummary([
+      sub({ customerPrice: 10, unitCost: 6, quantity: 2 }), // rev 20, cost 12
+      sub({ customerPrice: 30, unitCost: 20, quantity: 1 }), // rev 30, cost 20
+      sub({ billingFrequency: "one_time", customerPrice: 100, unitCost: 50 }), // excluded
+      sub({ status: "Expire", customerPrice: 99, unitCost: 99 }), // excluded
+    ]);
+    expect(s.activeCount).toBe(2);
+    expect(s.mrr).toBeCloseTo(50, 2);
+    expect(s.monthlyCost).toBeCloseTo(32, 2);
+    expect(s.monthlyMargin).toBeCloseTo(18, 2);
+    expect(s.arr).toBeCloseTo(600, 2);
+    expect(s.annualCost).toBeCloseTo(384, 2);
+    expect(s.annualMargin).toBeCloseTo(216, 2);
+    expect(s.marginPct).toBeCloseTo(36, 1);
+  });
+
+  it("marginPct is 0 when there is no revenue", () => {
+    expect(recurringSummary([]).marginPct).toBe(0);
+    expect(recurringSummary([]).activeCount).toBe(0);
   });
 });
