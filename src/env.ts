@@ -39,6 +39,11 @@ const serverSchema = z.object({
 
   WOLF365_BOOTSTRAP_ADMINS: z.string().optional().default(""),
 
+  // Optional static-IP egress proxy. When set, all connector API calls are
+  // routed through it so they originate from a fixed IP (e.g. for QuickBooks
+  // production IP allowlisting). Format: http(s)://user:pass@host:port
+  OUTBOUND_PROXY_URL: z.string().url().optional(),
+
   // Shared secret used to authenticate Vercel Cron invocations. Optional in
   // development; required for the cron endpoint to do any work.
   CRON_SECRET: z.string().optional(),

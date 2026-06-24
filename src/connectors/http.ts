@@ -1,6 +1,16 @@
 import type { ConnectorType } from "@prisma/client";
+import { ProxyAgent } from "undici";
 import { writeDebugLog } from "@/lib/debug-log";
 import { safeUrl } from "@/lib/redact";
+
+/**
+ * Optional static-IP egress proxy. When OUTBOUND_PROXY_URL is set, every
+ * connector API call is dispatched through it so the request originates from a
+ * fixed IP (required by, e.g., QuickBooks Online production IP allowlisting).
+ * Created once per process.
+ */
+const proxyUrl = process.env.OUTBOUND_PROXY_URL;
+const proxyAgent = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
 
 /**
  * Shared HTTP client for connectors.
@@ -68,7 +78,9 @@ export async function connectorFetch(
         signal: controller.signal,
         // Connectors talk to external HTTPS APIs; never cache.
         cache: "no-store",
-      });
+        // Route through the static-IP proxy when configured (undici dispatcher).
+        ...(proxyAgent ? { dispatcher: proxyAgent } : {}),
+      } as RequestInit & { dispatcher?: unknown });
       clearTimeout(timer);
 
       const text = await res.text();
