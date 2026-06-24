@@ -31,6 +31,25 @@ describe("RBAC three-role policy", () => {
     expect(can("REVIEWER", "reports:export")).toBe(false);
   });
 
+  it("Sales has CRM access only", () => {
+    expect(can("SALES", "crm:read")).toBe(true);
+    expect(can("SALES", "crm:write")).toBe(true);
+    // Nothing outside CRM.
+    expect(can("SALES", "billing:read")).toBe(false);
+    expect(can("SALES", "clients:read")).toBe(false);
+    expect(can("SALES", "connectors:read")).toBe(false);
+    expect(can("SALES", "reports:read")).toBe(false);
+  });
+
+  it("Administrator and Power User also have full CRM access", () => {
+    for (const r of ["ADMINISTRATOR", "POWER_USER"] as const) {
+      expect(can(r, "crm:read")).toBe(true);
+      expect(can(r, "crm:write")).toBe(true);
+    }
+    // Reviewer does not get CRM.
+    expect(can("REVIEWER", "crm:read")).toBe(false);
+  });
+
   it("denies when role is missing", () => {
     expect(can(null, "billing:read")).toBe(false);
     expect(can(undefined, "clients:read")).toBe(false);

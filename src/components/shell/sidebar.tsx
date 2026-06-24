@@ -16,6 +16,10 @@ import {
   ShieldCheck,
   Settings,
   Users,
+  LineChart,
+  Wrench,
+  Network,
+  Cloud,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,10 +39,15 @@ const ICONS: Record<string, LucideIcon> = {
   ShieldCheck,
   Settings,
   Users,
+  LineChart,
+  Wrench,
+  Network,
+  Cloud,
 };
 
 const SECTION_ORDER = [
   "Workspace",
+  "CRM",
   "Reconciliation",
   "Administration",
   "Account",

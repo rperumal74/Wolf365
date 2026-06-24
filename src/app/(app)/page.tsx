@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, PiggyBank } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
@@ -12,6 +14,11 @@ import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
  */
 export default async function DashboardPage() {
   const user = await requireUser();
+
+  // CRM-only users (Sales) have no billing access — send them to the forecast.
+  if (can(user.role, "crm:read") && !can(user.role, "billing:read")) {
+    redirect("/crm/forecast");
+  }
 
   const [clients, connectors, openExceptions, billingRuns, clientsWithSubs] =
     await Promise.all([

@@ -26,6 +26,7 @@ datasource db {
 enum Role {
   ADMINISTRATOR // Full control — everything, incl. connector credentials, security, users
   POWER_USER // Operate billing & run syncs/tests, but cannot change connector credentials or admin settings
+  SALES // CRM only — manage opportunities and view the sales forecast
   REVIEWER // Read-only — view numbers, charts and reports; no changes, no billing, no syncs
 }
 
@@ -47,6 +48,8 @@ model User {
   accounts  Account[]
   sessions  Session[]
   auditLogs AuditLog[]
+  ownedOpportunities   CrmOpportunity[] @relation("OpportunityOwner")
+  createdOpportunities CrmOpportunity[] @relation("OpportunityCreator")
 
   @@index([role])
 }
@@ -244,6 +247,9 @@ enum AuditAction {
   USER_ROLE_CHANGED
   USER_DISABLED
   USER_ENABLED
+  OPPORTUNITY_CREATED
+  OPPORTUNITY_UPDATED
+  OPPORTUNITY_DELETED
 }
 
 model AuditLog {
@@ -284,6 +290,7 @@ model Client {
   billingRuns BillingRun[]
   exceptions  Exception[]
   superOpsInvoices SuperOpsInvoice[]
+  crmOpportunities CrmOpportunity[]
 
   @@index([name])
 }
@@ -666,5 +673,95 @@ model Exception {
   resolvedAt DateTime?
 
   @@index([type, status])
+  @@index([clientId])
+}
+
+// ---------------------------------------------------------------------------
+// CRM — sales pipeline for prospective agreements. Self-contained (our own DB);
+// separate from the synced billing data. Three lines of business, each a 1/2/3
+// year agreement. Managed Services and Managed NOC bill monthly only; M365 can
+// bill monthly or yearly.
+// ---------------------------------------------------------------------------
+
+enum CrmLine {
+  MANAGED_SERVICES
+  MANAGED_NOC
+  M365
+}
+
+enum CrmStage {
+  PROSPECTING
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum CrmForecastCategory {
+  PIPELINE
+  BEST_CASE
+  COMMIT
+  CLOSED
+  OMITTED
+}
+
+enum CrmBillingFrequency {
+  MONTHLY
+  YEARLY
+}
+
+enum CrmOpportunityType {
+  NEW_BUSINESS
+  RENEWAL
+  UPSELL
+}
+
+model CrmOpportunity {
+  id        String  @id @default(cuid())
+  line      CrmLine
+  name      String
+
+  // Prospect/account this deal is for. Free text because prospects may not yet
+  // exist as a synced Client; optionally linked to one when they do.
+  accountName String
+  clientId    String?
+  client      Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  ownerId String
+  owner   User   @relation("OpportunityOwner", fields: [ownerId], references: [id])
+
+  // Money. marginPercentage is derived on save from amount + marginAmount.
+  amount           Decimal? @db.Decimal(18, 2)
+  marginAmount     Decimal? @db.Decimal(18, 2)
+  marginPercentage Decimal? @db.Decimal(6, 2)
+
+  // Agreement shape.
+  termYears        Int                 @default(1) // 1 | 2 | 3
+  billingFrequency CrmBillingFrequency @default(MONTHLY)
+
+  // Funnel.
+  stage            CrmStage            @default(PROSPECTING)
+  probability      Int                 @default(10) // 0–100
+  forecastCategory CrmForecastCategory @default(PIPELINE)
+  closeDate        DateTime
+
+  // Optional extras mirrored from the existing process.
+  estimatedInvoiceDate DateTime?
+  cashInDate           DateTime?
+  lockbox              Boolean             @default(false)
+  type                 CrmOpportunityType?
+  leadSource           String?
+  nextStep             String?
+  description          String?
+
+  createdById String?
+  createdBy   User?    @relation("OpportunityCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([line, stage])
+  @@index([ownerId])
+  @@index([closeDate])
   @@index([clientId])
 }

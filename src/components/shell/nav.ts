@@ -8,7 +8,7 @@ export interface NavItem {
   icon: string;
   permission?: Permission;
   /** Visually grouped under this section heading. */
-  section: "Workspace" | "Reconciliation" | "Administration" | "Account";
+  section: "Workspace" | "CRM" | "Reconciliation" | "Administration" | "Account";
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -16,6 +16,10 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Clients", href: "/clients", icon: "Building2", section: "Workspace", permission: "clients:read" },
   { label: "Billing Runs", href: "/billing", icon: "Receipt", section: "Workspace", permission: "billing:read" },
   { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Workspace", permission: "billing:read" },
+  { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
+  { label: "Managed Services", href: "/crm/managed-services", icon: "Wrench", section: "CRM", permission: "crm:read" },
+  { label: "Managed NOC", href: "/crm/managed-noc", icon: "Network", section: "CRM", permission: "crm:read" },
+  { label: "M365", href: "/crm/m365", icon: "Cloud", section: "CRM", permission: "crm:read" },
   { label: "Mappings", href: "/mappings", icon: "GitMerge", section: "Reconciliation", permission: "mappings:read" },
   { label: "Exceptions", href: "/exceptions", icon: "TriangleAlert", section: "Reconciliation", permission: "reports:read" },
   { label: "Reports", href: "/reports", icon: "BarChart3", section: "Reconciliation", permission: "reports:read" },

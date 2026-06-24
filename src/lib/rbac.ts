@@ -25,7 +25,9 @@ export type Permission =
   | "billing:push"
   | "reports:read"
   | "reports:export"
-  | "audit:read";
+  | "audit:read"
+  | "crm:read"
+  | "crm:write";
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Administrator — full control over everything.
@@ -47,6 +49,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "reports:read",
     "reports:export",
     "audit:read",
+    "crm:read",
+    "crm:write",
   ],
   // Power User — can operate the whole billing pipeline and run syncs / test
   // connections, but CANNOT change connector credentials or other admin-only
@@ -66,7 +70,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "reports:read",
     "reports:export",
     "audit:read",
+    "crm:read",
+    "crm:write",
   ],
+  // Sales — CRM only. Manage opportunities and view the sales forecast; no
+  // access to billing, connectors, or admin settings.
+  SALES: ["crm:read", "crm:write"],
   // Reviewer — read-only. Can view numbers, charts and reports, but cannot run
   // billing, sync anything, or change any setting.
   REVIEWER: [
@@ -103,6 +112,7 @@ export class ForbiddenError extends Error {
 export const ROLE_LABELS: Record<Role, string> = {
   ADMINISTRATOR: "Administrator",
   POWER_USER: "Power User",
+  SALES: "Sales",
   REVIEWER: "Reviewer",
 };
 
@@ -112,6 +122,8 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
     "Full access to everything, including connector credentials, security, and user management.",
   POWER_USER:
     "Can run billing, approve/push invoices, and sync or test connectors — but cannot change connector credentials or admin settings.",
+  SALES:
+    "CRM only. Can create and manage sales opportunities and view the forecast. No access to billing, connectors, or admin settings.",
   REVIEWER:
     "Read-only. Can view numbers, charts and reports. Cannot run billing, sync, or change anything.",
 };
@@ -120,5 +132,6 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
 export const ASSIGNABLE_ROLES: Role[] = [
   "ADMINISTRATOR",
   "POWER_USER",
+  "SALES",
   "REVIEWER",
 ];

@@ -50,3 +50,17 @@ export function formatDateTime(
     return new Intl.DateTimeFormat("en-US", { ...opts, timeZone: "UTC" }).format(d);
   }
 }
+
+/** Date-only formatting (no time) for due/close dates. Rendered in UTC so a
+ *  date-only value isn't shifted across midnight by the server's timezone. */
+export function formatDate(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(d);
+}
