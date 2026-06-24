@@ -13,6 +13,7 @@ import {
   type QboEnvironment,
   type QboSecrets,
 } from "@/connectors/quickbooks/oauth";
+import { getQboEndpoints } from "@/connectors/quickbooks/discovery";
 
 interface QboConfig {
   environment?: QboEnvironment;
@@ -28,8 +29,11 @@ async function qboGet(
   action: string,
 ): Promise<{ status: number; ok: boolean; json: unknown }> {
   const env = ctx.config.environment ?? "sandbox";
-  const accessToken = await getValidAccessToken(ctx.secrets, (next) =>
-    ctx.saveSecrets(next),
+  const { tokenEndpoint } = await getQboEndpoints(env);
+  const accessToken = await getValidAccessToken(
+    ctx.secrets,
+    (next) => ctx.saveSecrets(next),
+    tokenEndpoint,
   );
   const base = qboApiBase(env);
   const url = `${base}${path}${path.includes("?") ? "&" : "?"}minorversion=73`;

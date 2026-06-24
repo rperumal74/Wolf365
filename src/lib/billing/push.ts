@@ -11,6 +11,7 @@ import {
   type QboEnvironment,
   type QboSecrets,
 } from "@/connectors/quickbooks/oauth";
+import { getQboEndpoints } from "@/connectors/quickbooks/discovery";
 
 /**
  * Push an approved billing run to QuickBooks Online as a single invoice for the
@@ -58,9 +59,12 @@ export async function pushBillingRunToQbo(
   const ctx = await buildContext(connector);
   const secrets = ctx.secrets as QboSecrets;
   const env = (ctx.config.environment as QboEnvironment) ?? "sandbox";
+  const { tokenEndpoint } = await getQboEndpoints(env);
 
-  const accessToken = await getValidAccessToken(secrets, (next) =>
-    ctx.saveSecrets(next as Record<string, unknown>),
+  const accessToken = await getValidAccessToken(
+    secrets,
+    (next) => ctx.saveSecrets(next as Record<string, unknown>),
+    tokenEndpoint,
   );
 
   // Build the QBO invoice payload from eligible lines.

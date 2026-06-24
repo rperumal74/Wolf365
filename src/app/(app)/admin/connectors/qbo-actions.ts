@@ -13,11 +13,12 @@ import { rateLimit } from "@/lib/rate-limit";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
 import {
-  QBO_AUTHORIZE_URL,
   QBO_SCOPE,
   revokeToken,
+  type QboEnvironment,
   type QboSecrets,
 } from "@/connectors/quickbooks/oauth";
+import { getQboEndpoints } from "@/connectors/quickbooks/discovery";
 import { loadQboConnection, qboRedirectUri } from "@/connectors/quickbooks/store";
 
 const STATE_COOKIE = "qbo_oauth_state";
@@ -33,13 +34,15 @@ export async function connectQuickBooksAction(): Promise<void> {
   const rl = await rateLimit(`qbo-connect:${user.id}`, 30, 60_000);
   if (!rl.ok) redirect(`${CONNECTOR_PAGE}?qbo=rate_limited`);
 
-  const { secrets } = await loadQboConnection();
+  const { config, secrets } = await loadQboConnection();
   if (!secrets.clientId) redirect(`${CONNECTOR_PAGE}?qbo=missing_client`);
 
+  const env = (config.environment as QboEnvironment) ?? "sandbox";
+  const { authorizationEndpoint } = await getQboEndpoints(env);
   const redirectUri = await qboRedirectUri();
   const state = randomBytes(24).toString("base64url");
 
-  const authorizeUrl = new URL(QBO_AUTHORIZE_URL);
+  const authorizeUrl = new URL(authorizationEndpoint);
   authorizeUrl.searchParams.set("client_id", secrets.clientId!);
   authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("scope", QBO_SCOPE);
@@ -76,10 +79,13 @@ export async function disconnectQuickBooksAction(): Promise<void> {
   let revokeError: string | null = null;
   if (secrets.clientId && secrets.clientSecret && secrets.refreshToken) {
     try {
+      const env = (config.environment as QboEnvironment) ?? "sandbox";
+      const { revocationEndpoint } = await getQboEndpoints(env);
       await revokeToken({
         clientId: secrets.clientId,
         clientSecret: secrets.clientSecret,
         token: secrets.refreshToken,
+        revokeUrl: revocationEndpoint,
       });
     } catch (err) {
       revokeError = safeErrorMessage(err);

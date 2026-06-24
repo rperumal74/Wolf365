@@ -7,7 +7,12 @@ import { setEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
-import { exchangeCodeForTokens, type QboSecrets } from "@/connectors/quickbooks/oauth";
+import {
+  exchangeCodeForTokens,
+  type QboEnvironment,
+  type QboSecrets,
+} from "@/connectors/quickbooks/oauth";
+import { getQboEndpoints } from "@/connectors/quickbooks/discovery";
 import { loadQboConnection, qboRedirectUri } from "@/connectors/quickbooks/store";
 
 export const dynamic = "force-dynamic";
@@ -58,11 +63,14 @@ export async function GET(request: Request) {
   try {
     // Must match the redirect_uri sent at connect time.
     const redirectUri = await qboRedirectUri();
+    const env = (config.environment as QboEnvironment) ?? "sandbox";
+    const { tokenEndpoint } = await getQboEndpoints(env);
     const tokens = await exchangeCodeForTokens({
       code,
       redirectUri,
       clientId: secrets.clientId,
       clientSecret: secrets.clientSecret,
+      tokenUrl: tokenEndpoint,
     });
 
     const next: QboSecrets = {

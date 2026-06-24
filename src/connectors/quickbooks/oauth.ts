@@ -66,13 +66,15 @@ export async function exchangeCodeForTokens(params: {
   redirectUri: string;
   clientId: string;
   clientSecret: string;
+  /** Token endpoint (from the discovery document); defaults to the constant. */
+  tokenUrl?: string;
 }): Promise<TokenResponse> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: params.code,
     redirect_uri: params.redirectUri,
   });
-  const res = await connectorFetch(QBO_TOKEN_URL, {
+  const res = await connectorFetch(params.tokenUrl ?? QBO_TOKEN_URL, {
     connectorType: "QUICKBOOKS_ONLINE",
     action: "oauth_token_exchange",
     method: "POST",
@@ -98,6 +100,8 @@ export async function exchangeCodeForTokens(params: {
 export async function getValidAccessToken(
   secrets: QboSecrets,
   save: (next: QboSecrets) => Promise<void>,
+  /** Token endpoint (from the discovery document); defaults to the constant. */
+  tokenUrl?: string,
 ): Promise<string> {
   if (!secrets.clientId || !secrets.clientSecret) {
     throw new Error("QuickBooks client credentials are not configured");
@@ -121,7 +125,7 @@ export async function getValidAccessToken(
     grant_type: "refresh_token",
     refresh_token: secrets.refreshToken,
   });
-  const res = await connectorFetch(QBO_TOKEN_URL, {
+  const res = await connectorFetch(tokenUrl ?? QBO_TOKEN_URL, {
     connectorType: "QUICKBOOKS_ONLINE",
     action: "oauth_token_refresh",
     method: "POST",
@@ -160,8 +164,10 @@ export async function revokeToken(params: {
   clientId: string;
   clientSecret: string;
   token: string;
+  /** Revocation endpoint (from the discovery document); defaults to constant. */
+  revokeUrl?: string;
 }): Promise<boolean> {
-  const res = await connectorFetch(QBO_REVOKE_URL, {
+  const res = await connectorFetch(params.revokeUrl ?? QBO_REVOKE_URL, {
     connectorType: "QUICKBOOKS_ONLINE",
     action: "oauth_revoke",
     method: "POST",
