@@ -20,6 +20,8 @@ export const QBO_AUTHORIZE_URL =
   "https://appcenter.intuit.com/connect/oauth2";
 export const QBO_TOKEN_URL =
   "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
+export const QBO_REVOKE_URL =
+  "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
 // Accounting scope is required for customers, items, and invoices.
 export const QBO_SCOPE = "com.intuit.quickbooks.accounting";
 
@@ -147,4 +149,29 @@ export async function getValidAccessToken(
   };
   await save(next);
   return token.access_token;
+}
+
+/**
+ * Revoke a QuickBooks token (refresh or access) with Intuit, severing the
+ * connection on their side. Best-effort: returns true on a 200, false otherwise
+ * (a 400 often just means the token was already invalid/expired).
+ */
+export async function revokeToken(params: {
+  clientId: string;
+  clientSecret: string;
+  token: string;
+}): Promise<boolean> {
+  const res = await connectorFetch(QBO_REVOKE_URL, {
+    connectorType: "QUICKBOOKS_ONLINE",
+    action: "oauth_revoke",
+    method: "POST",
+    headers: {
+      Authorization: basicAuthHeader(params.clientId, params.clientSecret),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ token: params.token }),
+    maxAttempts: 2,
+  });
+  return res.ok;
 }

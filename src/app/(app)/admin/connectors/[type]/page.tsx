@@ -31,6 +31,9 @@ const QBO_STATUS_MESSAGES: Record<string, { ok: boolean; text: string }> = {
   missing_code: { ok: false, text: "QuickBooks did not return an authorization code." },
   missing_client: { ok: false, text: "Save the OAuth Client ID/Secret before connecting." },
   error: { ok: false, text: "QuickBooks token exchange failed. Check credentials and try again." },
+  disconnected: { ok: true, text: "QuickBooks disconnected and token revoked." },
+  not_connected: { ok: false, text: "QuickBooks was not connected." },
+  disconnect_error: { ok: false, text: "Disconnect failed — see debug logs." },
 };
 
 export default async function ConnectorConfigPage({
@@ -104,12 +107,20 @@ export default async function ConnectorConfigPage({
               </p>
             )}
             {canConfigure && view.secretsSet.clientId && (
-              <a
-                href="/api/connectors/quickbooks/connect"
-                className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-              >
-                Connect QuickBooks
-              </a>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <a
+                  href="/api/connectors/quickbooks/connect"
+                  className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                >
+                  {view.health === "HEALTHY" ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                </a>
+                <a
+                  href="/api/connectors/quickbooks/disconnect"
+                  className="inline-block rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent"
+                >
+                  Disconnect
+                </a>
+              </div>
             )}
           </div>
         )}
