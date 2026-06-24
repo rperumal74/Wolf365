@@ -1,13 +1,13 @@
 "use server";
 
 import { randomBytes } from "node:crypto";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ConnectorHealth } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { decryptJson, encryptJson } from "@/lib/crypto";
-import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
+import { encryptJson } from "@/lib/crypto";
+import { setEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
 import { rateLimit } from "@/lib/rate-limit";
 import { audit } from "@/lib/audit";
@@ -18,16 +18,10 @@ import {
   revokeToken,
   type QboSecrets,
 } from "@/connectors/quickbooks/oauth";
+import { loadQboConnection, qboRedirectUri } from "@/connectors/quickbooks/store";
 
 const STATE_COOKIE = "qbo_oauth_state";
 const CONNECTOR_PAGE = "/admin/connectors/QUICKBOOKS_ONLINE";
-
-/** Origin of the current request (for the OAuth redirect URI). */
-async function currentOrigin(): Promise<string> {
-  const h = await headers();
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  return `${proto}://${h.get("host")}`;
-}
 
 /**
  * Begin the QuickBooks OAuth flow. A POST server action (CSRF-protected by
@@ -39,17 +33,10 @@ export async function connectQuickBooksAction(): Promise<void> {
   const rl = await rateLimit(`qbo-connect:${user.id}`, 30, 60_000);
   if (!rl.ok) redirect(`${CONNECTOR_PAGE}?qbo=rate_limited`);
 
-  const connector = await prisma.connector.findUnique({
-    where: { type: "QUICKBOOKS_ONLINE" },
-  });
-  const stored: Record<string, unknown> = connector?.secretsEnc
-    ? decryptJson<Record<string, unknown>>(connector.secretsEnc)
-    : {};
-  const config = (connector?.config as Record<string, unknown>) ?? {};
-  const secrets = getEnvSecrets(stored, config) as QboSecrets;
+  const { secrets } = await loadQboConnection();
   if (!secrets.clientId) redirect(`${CONNECTOR_PAGE}?qbo=missing_client`);
 
-  const redirectUri = `${await currentOrigin()}/api/connectors/quickbooks/callback`;
+  const redirectUri = await qboRedirectUri();
   const state = randomBytes(24).toString("base64url");
 
   const authorizeUrl = new URL(QBO_AUTHORIZE_URL);
@@ -72,58 +59,53 @@ export async function connectQuickBooksAction(): Promise<void> {
 }
 
 /**
- * Disconnect QuickBooks: revoke the token with Intuit and clear the stored
- * connection for the active environment (keeping client id/secret for reconnect).
- * A POST server action so it can't be triggered via a cross-site GET.
+ * Disconnect QuickBooks: revoke the token with Intuit (best-effort) and ALWAYS
+ * clear the stored connection for the active environment (keeping client id/
+ * secret for reconnect). The local clear must succeed even if Intuit's revoke
+ * endpoint is unreachable. A POST server action (CSRF-protected by Next.js).
  */
 export async function disconnectQuickBooksAction(): Promise<void> {
   const user = await requirePermission("connectors:configure");
   const rl = await rateLimit(`qbo-disconnect:${user.id}`, 30, 60_000);
   if (!rl.ok) redirect(`${CONNECTOR_PAGE}?qbo=rate_limited`);
 
-  const connector = await prisma.connector.findUnique({
-    where: { type: "QUICKBOOKS_ONLINE" },
-  });
+  const { connector, stored, config, secrets } = await loadQboConnection();
   if (!connector?.secretsEnc) redirect(`${CONNECTOR_PAGE}?qbo=not_connected`);
 
-  const stored = decryptJson<Record<string, unknown>>(connector!.secretsEnc!);
-  const config = (connector!.config as Record<string, unknown>) ?? {};
-  const secrets = getEnvSecrets(stored, config) as QboSecrets;
-
-  try {
-    if (secrets.clientId && secrets.clientSecret && secrets.refreshToken) {
+  // Best-effort revoke with Intuit — must NOT block the local disconnect.
+  let revokeError: string | null = null;
+  if (secrets.clientId && secrets.clientSecret && secrets.refreshToken) {
+    try {
       await revokeToken({
         clientId: secrets.clientId,
         clientSecret: secrets.clientSecret,
         token: secrets.refreshToken,
       });
+    } catch (err) {
+      revokeError = safeErrorMessage(err);
     }
-    const cleared: QboSecrets = {
-      clientId: secrets.clientId,
-      clientSecret: secrets.clientSecret,
-    };
-    const merged = setEnvSecrets(stored, config, cleared as Record<string, unknown>);
-    await prisma.connector.update({
-      where: { type: "QUICKBOOKS_ONLINE" },
-      data: { secretsEnc: encryptJson(merged), health: ConnectorHealth.UNCONFIGURED },
-    });
-    await audit({
-      action: "CONNECTOR_CONFIG_CHANGED",
-      actorId: user.id,
-      actorEmail: user.email,
-      target: "connector:QUICKBOOKS_ONLINE",
-      metadata: { event: "qbo_disconnected" },
-    });
-  } catch (err) {
-    await audit({
-      action: "CONNECTOR_CONFIG_CHANGED",
-      actorId: user.id,
-      actorEmail: user.email,
-      target: "connector:QUICKBOOKS_ONLINE",
-      metadata: { event: "qbo_disconnect_failed", error: safeErrorMessage(err) },
-    });
-    redirect(`${CONNECTOR_PAGE}?qbo=disconnect_error`);
   }
+
+  // Always clear the stored connection (keep client id/secret for reconnect).
+  const cleared: QboSecrets = {
+    clientId: secrets.clientId,
+    clientSecret: secrets.clientSecret,
+  };
+  const merged = setEnvSecrets(stored, config, cleared as Record<string, unknown>);
+  await prisma.connector.update({
+    where: { type: "QUICKBOOKS_ONLINE" },
+    data: { secretsEnc: encryptJson(merged), health: ConnectorHealth.UNCONFIGURED },
+  });
+  await audit({
+    action: "CONNECTOR_CONFIG_CHANGED",
+    actorId: user.id,
+    actorEmail: user.email,
+    target: "connector:QUICKBOOKS_ONLINE",
+    metadata: { event: "qbo_disconnected", revokeError },
+  });
+
   revalidatePath(CONNECTOR_PAGE);
-  redirect(`${CONNECTOR_PAGE}?qbo=disconnected`);
+  // If the remote revoke failed, the local connection is still cleared; surface
+  // a partial-success status so the admin knows to revoke in Intuit manually.
+  redirect(`${CONNECTOR_PAGE}?qbo=${revokeError ? "disconnected_local" : "disconnected"}`);
 }

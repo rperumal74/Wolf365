@@ -36,7 +36,9 @@ const QBO_STATUS_MESSAGES: Record<string, { ok: boolean; text: string }> = {
   missing_client: { ok: false, text: "Save the OAuth Client ID/Secret before connecting." },
   error: { ok: false, text: "QuickBooks token exchange failed. Check credentials and try again." },
   disconnected: { ok: true, text: "QuickBooks disconnected and token revoked." },
+  disconnected_local: { ok: true, text: "QuickBooks disconnected locally, but the token could not be revoked at Intuit — revoke it manually in the Intuit dashboard." },
   not_connected: { ok: false, text: "QuickBooks was not connected." },
+  rate_limited: { ok: false, text: "Too many attempts — wait a moment and retry." },
   disconnect_error: { ok: false, text: "Disconnect failed — see debug logs." },
 };
 

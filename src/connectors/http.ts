@@ -27,8 +27,14 @@ function buildProxyAgent(raw: string | undefined): ProxyAgent | undefined {
       : undefined;
     const uri = `${u.protocol}//${u.host}`;
     return new ProxyAgent(token ? { uri, token } : { uri });
-  } catch {
-    return new ProxyAgent(raw);
+  } catch (err) {
+    // A malformed proxy URL must not crash module load (which would break every
+    // route importing this client). Degrade to no proxy with a warning.
+    console.error(
+      "[connector-http] invalid proxy URL; outbound calls will NOT use a proxy:",
+      err instanceof Error ? err.message : "unknown",
+    );
+    return undefined;
   }
 }
 

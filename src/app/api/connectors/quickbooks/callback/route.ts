@@ -2,15 +2,13 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
-import { decryptJson, encryptJson, safeEqual } from "@/lib/crypto";
-import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
+import { encryptJson, safeEqual } from "@/lib/crypto";
+import { setEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
-import {
-  exchangeCodeForTokens,
-  type QboSecrets,
-} from "@/connectors/quickbooks/oauth";
+import { exchangeCodeForTokens, type QboSecrets } from "@/connectors/quickbooks/oauth";
+import { loadQboConnection, qboRedirectUri } from "@/connectors/quickbooks/store";
 
 export const dynamic = "force-dynamic";
 
@@ -52,20 +50,14 @@ export async function GET(request: Request) {
     return redirectToConnector(origin, "missing_code");
   }
 
-  const connector = await prisma.connector.findUnique({
-    where: { type: "QUICKBOOKS_ONLINE" },
-  });
-  const stored: Record<string, unknown> = connector?.secretsEnc
-    ? decryptJson<Record<string, unknown>>(connector.secretsEnc)
-    : {};
-  const config = (connector?.config as Record<string, unknown>) ?? {};
-  const secrets = getEnvSecrets(stored, config) as QboSecrets;
+  const { stored, config, secrets } = await loadQboConnection();
   if (!secrets.clientId || !secrets.clientSecret) {
     return redirectToConnector(origin, "missing_client");
   }
 
   try {
-    const redirectUri = `${origin}/api/connectors/quickbooks/callback`;
+    // Must match the redirect_uri sent at connect time.
+    const redirectUri = await qboRedirectUri();
     const tokens = await exchangeCodeForTokens({
       code,
       redirectUri,
