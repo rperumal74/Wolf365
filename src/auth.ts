@@ -31,6 +31,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
           // Request group claims so we can map Entra groups to roles when the
           // app registration is configured to emit them.
           authorization: { params: { scope: "openid profile email" } },
+          // Invite-only: admins pre-create the user row, then the Entra account
+          // links to it by email on first sign-in. Safe here because Entra is
+          // the single trusted IdP and sign-in is domain-allowlisted, so the
+          // email is verified by the tenant (not user-asserted).
+          allowDangerousEmailAccountLinking: true,
         }),
       ]
     : [];
@@ -43,21 +48,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
     useSecureCookies: process.env.NODE_ENV === "production",
     trustHost: true,
     callbacks: {
-      // Enforce the domain allowlist and account status before linking.
+      // Enforce the domain allowlist, invite-only provisioning, and account
+      // status before any account is linked.
       async signIn({ user }) {
         if (!sso) return false;
         if (!isDomainAllowed(user.email, sso.allowedDomains)) {
           return false;
         }
-        // Block users an administrator has disabled (existing accounts only;
-        // brand-new sign-ins have no record yet and are allowed in as REVIEWER).
-        if (user.email) {
-          const existing = await prisma.user.findUnique({
-            where: { email: user.email.toLowerCase() },
-            select: { disabled: true },
-          });
-          if (existing?.disabled) return false;
+        const email = user.email?.toLowerCase();
+        if (!email) return false;
+
+        const existing = await prisma.user.findUnique({
+          where: { email },
+          select: { disabled: true },
+        });
+
+        // INVITE-ONLY: a user must be created by an administrator first. The
+        // only exception is a configured bootstrap admin, which is how the very
+        // first administrator gets in on an empty database. Unknown emails are
+        // rejected here BEFORE the adapter would create a record.
+        if (!existing && !bootstrapAdmins.includes(email)) {
+          return false;
         }
+        // Block users an administrator has disabled.
+        if (existing?.disabled) return false;
         return true;
       },
       // Surface role + id on the session (database strategy passes `user`).

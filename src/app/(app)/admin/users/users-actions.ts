@@ -13,6 +13,15 @@ export interface UserActionResult {
   message: string;
 }
 
+const createSchema = z.object({
+  email: z.string().trim().email("Enter a valid email address"),
+  name: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().trim().optional(),
+  ),
+  role: z.nativeEnum(Role),
+});
+
 const roleSchema = z.object({
   userId: z.string().min(1),
   role: z.nativeEnum(Role),
@@ -28,6 +37,46 @@ async function enabledAdminCount(): Promise<number> {
   return prisma.user.count({
     where: { role: "ADMINISTRATOR", disabled: false },
   });
+}
+
+/** Pre-create (invite) a user so they can sign in. Sign-in is invite-only:
+ *  only users that exist here (or a bootstrap admin) may authenticate. */
+export async function createUserAction(
+  _prev: UserActionResult | null,
+  formData: FormData,
+): Promise<UserActionResult> {
+  const actor = await requirePermission("users:manage");
+  try {
+    const { email, name, role } = createSchema.parse({
+      email: formData.get("email"),
+      name: formData.get("name"),
+      role: formData.get("role"),
+    });
+    const lower = email.toLowerCase();
+
+    const existing = await prisma.user.findUnique({ where: { email: lower } });
+    if (existing) {
+      return { ok: false, message: `${lower} already exists.` };
+    }
+
+    await prisma.user.create({
+      data: { email: lower, name: name ?? null, role },
+    });
+    await audit({
+      action: "USER_CREATED",
+      actorId: actor.id,
+      actorEmail: actor.email,
+      target: `user:${lower}`,
+      metadata: { email: lower, role },
+    });
+    revalidatePath("/admin/users");
+    return {
+      ok: true,
+      message: `Invited ${lower} as ${role}. They can now sign in with Microsoft 365.`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
 }
 
 /** Change a user's role. Admin-only; guards against removing the last admin. */

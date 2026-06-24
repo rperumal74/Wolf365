@@ -8,10 +8,15 @@ import { resolveSso } from "@/lib/auth/sso";
  * yet configured we show an honest empty state explaining how to bootstrap it
  * rather than a non-functional button.
  */
-export default async function SignInPage() {
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const user = await getCurrentUser();
   if (user) redirect("/");
 
+  const { error } = await searchParams;
   const sso = await resolveSso();
 
   async function doSignIn() {
@@ -35,6 +40,13 @@ export default async function SignInPage() {
       </div>
 
       <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-sm">
+        {error && (
+          <div className="mb-4 rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
+            {error === "AccessDenied"
+              ? "Access denied. Your account hasn’t been set up for this app — ask an administrator to add you, then try again."
+              : "Sign-in failed. Please try again, or contact an administrator."}
+          </div>
+        )}
         {sso ? (
           <form action={doSignIn}>
             <button

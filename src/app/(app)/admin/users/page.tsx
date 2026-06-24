@@ -4,19 +4,21 @@ import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
 import { ROLE_LABELS, ROLE_DESCRIPTIONS, ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { UsersTable, type UserRow } from "./users-table";
+import { CreateUserForm } from "./create-user-form";
 import { setUserRoleAction, setUserDisabledAction } from "./users-actions";
 
 /**
- * User management. Users are created automatically the first time someone signs
- * in with Microsoft 365 (as a Reviewer). Administrators assign roles and can
- * disable access here. Role changes apply on the user's next request; disabling
- * a user also revokes their active sessions immediately.
+ * User management. Sign-in is invite-only: a user must be created here before
+ * they can authenticate with Microsoft 365. Administrators assign roles and can
+ * disable access. Role changes apply on the user's next request; disabling a
+ * user also revokes their active sessions immediately.
  */
 export default async function UsersPage() {
   const me = await requirePermission("users:manage");
 
   const users = await prisma.user.findMany({
     orderBy: [{ disabled: "asc" }, { role: "asc" }, { email: "asc" }],
+    include: { _count: { select: { accounts: true } } },
   });
 
   // Most recent LOGIN per user, for an at-a-glance "last seen".
@@ -38,15 +40,18 @@ export default async function UsersPage() {
     lastLogin: lastById.get(u.id)
       ? formatDateTime(lastById.get(u.id) ?? null, me.timezone)
       : null,
+    pending: u._count.accounts === 0,
   }));
 
   return (
     <div>
       <PageHeader
         title="Users"
-        description="Assign roles and manage access. Sign-in is via Microsoft 365 — new users appear here automatically as Reviewers."
+        description="Invite-only: create a user here before they can sign in with Microsoft 365. Assign roles and manage access."
       />
       <div className="space-y-6 p-8">
+        <CreateUserForm />
+
         <UsersTable
           users={rows}
           currentUserId={me.id}

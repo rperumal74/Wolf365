@@ -18,6 +18,8 @@ export interface UserRow {
   role: Role;
   disabled: boolean;
   lastLogin: string | null;
+  /** True until they've signed in at least once (no linked account yet). */
+  pending: boolean;
 }
 
 interface Props {
@@ -117,6 +119,8 @@ export function UsersTable({
                   <td className="px-4 py-2">
                     {u.disabled ? (
                       <span className="text-danger">Disabled</span>
+                    ) : u.pending ? (
+                      <span className="text-warning">Invited — not signed in</span>
                     ) : (
                       <span className="text-success">Active</span>
                     )}
