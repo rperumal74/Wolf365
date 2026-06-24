@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ConnectorHealth } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
@@ -19,6 +20,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const user = await requirePermission("connectors:configure");
   const origin = new URL(request.url).origin;
+  const rl = await rateLimit(`qbo-disconnect:${clientIp(request)}`, 30, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
   const back = (status: string) =>
     NextResponse.redirect(
       new URL(`/admin/connectors/QUICKBOOKS_ONLINE?qbo=${status}`, origin),

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { decryptJson } from "@/lib/crypto";
 import { getEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 import {
   QBO_AUTHORIZE_URL,
   QBO_SCOPE,
@@ -22,6 +23,10 @@ const STATE_COOKIE = "qbo_oauth_state";
  */
 export async function GET(request: Request) {
   await requirePermission("connectors:configure");
+  const rl = await rateLimit(`qbo-connect:${clientIp(request)}`, 30, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
 
   const connector = await prisma.connector.findUnique({
     where: { type: "QUICKBOOKS_ONLINE" },

@@ -5,6 +5,7 @@ import { safeEqual } from "@/lib/crypto";
 import { runSync } from "@/connectors/runtime";
 import { purgeOldDebugLogs } from "@/lib/debug-log";
 import { safeErrorMessage } from "@/lib/redact";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 // Cron jobs may run longer than the default; allow up to 5 minutes.
 export const maxDuration = 300;
@@ -32,6 +33,11 @@ export async function GET(request: Request) {
   const expected = `Bearer ${env.CRON_SECRET}`;
   if (!safeEqual(authHeader, expected)) {
     return NextResponse.json({ ok: false }, { status: 401 });
+  }
+  // Defense-in-depth beyond the shared secret.
+  const rl = await rateLimit(`cron:${clientIp(request)}`, 10, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ ok: false, error: "rate limited" }, { status: 429 });
   }
 
   const enabled = await prisma.connector.findMany({

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { decryptJson, encryptJson, safeEqual } from "@/lib/crypto";
 import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
@@ -30,6 +31,10 @@ function redirectToConnector(origin: string, status: string): NextResponse {
 export async function GET(request: Request) {
   const user = await requirePermission("connectors:configure");
   const origin = new URL(request.url).origin;
+  const rl = await rateLimit(`qbo-callback:${clientIp(request)}`, 30, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
   const params = new URL(request.url).searchParams;
 
   const cookieStore = await cookies();

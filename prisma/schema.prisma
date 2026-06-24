@@ -91,6 +91,14 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// Fixed-window rate limiting for sensitive endpoints (DB-backed so it works
+// across serverless instances).
+model RateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+}
+
 // Admin-configurable Entra ID SSO. Single active row (singleton) selected by
 // `active`. clientSecretEnc is app-level encrypted.
 model SsoSettings {

@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
 import { fetch as undiciFetch } from "undici";
+import { rateLimit } from "@/lib/rate-limit";
 import { buildContext } from "@/connectors/runtime";
 import { connectorFetch, proxyAgent, proxyConfigured } from "@/connectors/http";
 import {
@@ -94,6 +95,10 @@ export async function runProbeAction(
   formData: FormData,
 ): Promise<ProbeResult> {
   const user = await requirePermission("connectors:configure");
+  const rl = await rateLimit(`probe:${user.id}`, 30, 60_000);
+  if (!rl.ok) {
+    return { ok: false, message: "Rate limit exceeded — wait a moment and retry." };
+  }
   const type = String(formData.get("type")) as ConnectorType;
   let path = String(formData.get("path") ?? "").trim();
   if (!path) return { ok: false, message: "Enter a path to probe." };
