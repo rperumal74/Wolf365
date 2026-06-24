@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { recurringSummary } from "@/lib/billing/recurring";
+import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import {
   detectDiscrepancies,
   type AddressLike,
@@ -234,6 +234,7 @@ export default async function ClientProfilePage({
                       <th className="py-1 pr-4 font-medium">Qty</th>
                       <th className="py-1 pr-4 font-medium">Cost</th>
                       <th className="py-1 pr-4 font-medium">Cust. price</th>
+                      <th className="py-1 pr-4 font-medium">MRR / mo</th>
                       <th className="py-1 pr-4 font-medium">Term</th>
                       <th className="py-1 pr-4 font-medium">Billing</th>
                       <th className="py-1 pr-4 font-medium">Renewal</th>
@@ -252,6 +253,9 @@ export default async function ClientProfilePage({
                         </td>
                         <td className="py-1.5 pr-4 tabular-nums">
                           {s.customerPrice != null ? formatCurrency(Number(s.customerPrice), s.currency ?? "CAD") : "—"}
+                        </td>
+                        <td className="py-1.5 pr-4 tabular-nums">
+                          {formatCurrency(monthlyRevenue(toRecurringInput(s)), s.currency ?? "CAD")}
                         </td>
                         <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
                         <td className="py-1.5 pr-4">{s.billingFrequency ?? "—"}</td>

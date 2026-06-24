@@ -46,12 +46,25 @@ export function isRecurringActive(sub: RecurringSubscriptionInput): boolean {
   return true;
 }
 
-/** Monthly amount for a unit price, applying the ÷12 share for annual billing. */
+/**
+ * Number of months the price covers, derived from the BILLING frequency (how
+ * often you're billed = the period one price covers). Monthly billing → 1 even
+ * for an annual commitment, because the price is already per-month. Unknown /
+ * blank defaults to 1 (treated as monthly) rather than guessing.
+ */
+export function billingPeriodMonths(billingFrequency: string | null): number {
+  const f = (billingFrequency ?? "").toLowerCase().replace(/[\s_-]/g, "");
+  if (!f) return 1;
+  if (/(trienn|3year|3yr|36month|p3y)/.test(f)) return 36;
+  if (/(bienn|2year|2yr|24month|p2y)/.test(f)) return 24;
+  if (/(ann|year|yr|p1y|12month)/.test(f)) return 12;
+  return 1; // monthly, monthly-billed, or unknown
+}
+
+/** Monthly amount for a unit price, normalizing by the billing period. */
 function lineMonthly(unitPrice: number, sub: RecurringSubscriptionInput): number {
   const line = unitPrice * sub.quantity;
-  const freq = (sub.billingFrequency ?? "").toLowerCase();
-  if (freq.includes("ann") || freq.includes("year")) return line / 12;
-  return line;
+  return line / billingPeriodMonths(sub.billingFrequency);
 }
 
 /** Monthly recurring revenue for one subscription (0 if one-time/inactive). */

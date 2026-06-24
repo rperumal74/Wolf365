@@ -39,6 +39,20 @@ describe("recurring revenue", () => {
     expect(monthlyRevenue(sub({ billingFrequency: "annual", customerPrice: 120, quantity: 1 }))).toBe(10);
   });
 
+  it("recognizes annual billing in many forms (incl. ISO + triennial)", () => {
+    for (const freq of ["Annually", "Yearly", "1 Year", "P1Y", "12 months"]) {
+      expect(monthlyRevenue(sub({ billingFrequency: freq, customerPrice: 120, quantity: 1 }))).toBe(10);
+    }
+    // Triennial price covers 36 months.
+    expect(monthlyRevenue(sub({ billingFrequency: "Triennial", customerPrice: 360, quantity: 1 }))).toBe(10);
+    expect(monthlyRevenue(sub({ billingFrequency: "P3Y", customerPrice: 360, quantity: 1 }))).toBe(10);
+  });
+
+  it("treats monthly / blank / unknown billing as a monthly price", () => {
+    expect(monthlyRevenue(sub({ billingFrequency: "Monthly", customerPrice: 10, quantity: 1 }))).toBe(10);
+    expect(monthlyRevenue(sub({ billingFrequency: null, customerPrice: 10, quantity: 1 }))).toBe(10);
+  });
+
   it("computeMrr sums and computeArr is 12x", () => {
     const mrr = computeMrr([
       sub({ customerPrice: 29.93, quantity: 4 }), // 119.72
