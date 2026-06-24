@@ -1,7 +1,9 @@
-import { Building2, Plug, Receipt, TriangleAlert } from "lucide-react";
+import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { PageHeader, Card } from "@/components/ui/primitives";
+import { formatCurrency } from "@/lib/utils";
+import { computeMrr, computeArr } from "@/lib/billing/recurring";
 
 /**
  * Dashboard. Shows real counts from the database. With an empty database every
@@ -10,12 +12,37 @@ import { PageHeader, Card } from "@/components/ui/primitives";
 export default async function DashboardPage() {
   const user = await requireUser();
 
-  const [clients, connectors, openExceptions, billingRuns] = await Promise.all([
-    prisma.client.count(),
-    prisma.connector.count({ where: { enabled: true } }),
-    prisma.exception.count({ where: { status: "OPEN" } }),
-    prisma.billingRun.count(),
-  ]);
+  const [clients, connectors, openExceptions, billingRuns, subscriptions] =
+    await Promise.all([
+      prisma.client.count(),
+      prisma.connector.count({ where: { enabled: true } }),
+      prisma.exception.count({ where: { status: "OPEN" } }),
+      prisma.billingRun.count(),
+      prisma.tdSynnexSubscription.findMany({
+        select: {
+          customerPrice: true,
+          unitCost: true,
+          quantity: true,
+          billingFrequency: true,
+          status: true,
+          currency: true,
+        },
+      }),
+    ]);
+
+  // Recurring revenue from synced M365 licensing (active, recurring lines).
+  const mrr = computeMrr(
+    subscriptions.map((s) => ({
+      customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
+      unitCost: s.unitCost != null ? Number(s.unitCost) : null,
+      quantity: s.quantity,
+      billingFrequency: s.billingFrequency,
+      status: s.status,
+    })),
+  );
+  const arr = computeArr(mrr);
+  const currency =
+    subscriptions.find((s) => s.currency)?.currency ?? "USD";
 
   const stats = [
     { label: "Clients", value: clients, icon: Building2 },
@@ -31,6 +58,36 @@ export default async function DashboardPage() {
         description="Microsoft 365 billing reconciliation workspace"
       />
       <div className="p-8">
+        {/* Recurring revenue from synced M365 licensing */}
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Card>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                MRR — Monthly Recurring Revenue
+              </p>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="mt-2 text-3xl font-semibold tabular-nums">
+              {formatCurrency(mrr, currency)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Active, recurring M365 licensing · customer price × quantity
+            </p>
+          </Card>
+          <Card>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                ARR — Annual Recurring Revenue
+              </p>
+              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="mt-2 text-3xl font-semibold tabular-nums">
+              {formatCurrency(arr, currency)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">MRR × 12</p>
+          </Card>
+        </div>
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {stats.map((s) => (
             <Card key={s.label}>
