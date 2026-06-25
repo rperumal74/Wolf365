@@ -14,12 +14,7 @@ import {
   forecastCategoryForProbability,
 } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
-import {
-  totalContractValue,
-  commissionAmount,
-  lineHasCommission,
-  COMMISSION_MONTHS,
-} from "@/lib/crm/pricing";
+import { totalContractValue } from "@/lib/crm/pricing";
 import { formatCurrency } from "@/lib/utils";
 import type { OpportunityActionResult } from "./actions";
 
@@ -118,8 +113,6 @@ export function OpportunityForm({
   const mrr = Number(monthlyAmount) || 0;
   const marginPct = computeMarginPercentage(mrr, Number(monthlyMargin) || 0);
   const tcv = totalContractValue(mrr, termYears);
-  const showCommission = lineHasCommission(line);
-  const commission = commissionAmount(line, termYears, mrr);
 
   return (
     <form action={action} className="space-y-8">
@@ -261,26 +254,9 @@ export function OpportunityForm({
             )}
           </Field>
 
-          {showCommission && (
-            <>
-              <Field
-                label="Commission"
-                help={`${lineLabel}: ${COMMISSION_MONTHS[termYears] ?? 0} month${(COMMISSION_MONTHS[termYears] ?? 0) === 1 ? "" : "s"} of MRR for a ${termYears}-year term. Calculated.`}
-              >
-                <div className="px-1 py-2 text-sm font-medium tabular-nums">
-                  {formatCurrency(commission)}
-                </div>
-              </Field>
-              <Field label="Next Step">
-                <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
-              </Field>
-            </>
-          )}
-          {!showCommission && (
-            <Field label="Next Step">
-              <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
-            </Field>
-          )}
+          <Field label="Next Step">
+            <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
+          </Field>
 
           <Field label="Close Date" required>
             <input

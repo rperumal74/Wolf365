@@ -4,22 +4,18 @@ import { Plus, Target } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { can } from "@/lib/rbac";
 import {
   CRM_LINES,
   lineFromSlug,
   STAGE_LABELS,
+  STAGE_ORDER,
   BILLING_FREQUENCY_LABELS,
   isOpenStage,
 } from "@/lib/crm/constants";
 import { computeForecast } from "@/lib/crm/forecast";
-import { lineHasCommission } from "@/lib/crm/pricing";
-
-const STAGE_STYLES: Record<string, string> = {
-  CLOSED_WON: "text-success",
-  CLOSED_LOST: "text-danger",
-};
+import { OpportunitiesTable, type OpportunityRow } from "./opportunities-table";
 
 export default async function CrmLinePage({
   params,
@@ -34,9 +30,10 @@ export default async function CrmLinePage({
   const config = CRM_LINES[line];
   const canWrite = can(user.role, "crm:write");
 
+  // Default newest opportunity first (the table also supports column sorting).
   const opps = await prisma.crmOpportunity.findMany({
     where: { line },
-    orderBy: [{ closeDate: "asc" }],
+    orderBy: [{ createdAt: "desc" }],
     include: { owner: { select: { name: true, email: true } } },
   });
 
@@ -51,20 +48,31 @@ export default async function CrmLinePage({
     })),
   );
 
-  const showCommission = lineHasCommission(line);
-  // Projected commission on open (not-yet-closed) opportunities.
-  const openCommission = opps
-    .filter((o) => o.stage !== "CLOSED_WON" && o.stage !== "CLOSED_LOST")
-    .reduce((sum, o) => sum + (o.commissionAmount ? Number(o.commissionAmount) : 0), 0);
-
   const stats = [
     { label: "Open opportunities", value: String(summary.openCount) },
     { label: "Open pipeline (TCV)", value: formatCurrency(summary.openAmount) },
     { label: "Weighted pipeline", value: formatCurrency(summary.weightedPipeline) },
-    showCommission
-      ? { label: "Commission (open)", value: formatCurrency(openCommission) }
-      : { label: "Won", value: formatCurrency(summary.wonAmount) },
+    { label: "Won", value: formatCurrency(summary.wonAmount) },
   ];
+
+  const rows: OpportunityRow[] = opps.map((o) => ({
+    id: o.id,
+    name: o.name,
+    account: o.accountName,
+    owner: o.owner.name ?? o.owner.email,
+    stage: o.stage,
+    stageLabel: STAGE_LABELS[o.stage],
+    stageOrder: STAGE_ORDER.indexOf(o.stage),
+    tcv: o.amount != null ? Number(o.amount) : null,
+    mrr: o.monthlyAmount != null ? Number(o.monthlyAmount) : null,
+    marginPct: o.marginPercentage != null ? Number(o.marginPercentage) : null,
+    termYears: o.termYears,
+    billingLabel: BILLING_FREQUENCY_LABELS[o.billingFrequency],
+    closeDate: o.closeDate.toISOString(),
+    createdAt: o.createdAt.toISOString(),
+    probability: o.probability,
+    isOpen: isOpenStage(o.stage),
+  }));
 
   return (
     <div>
@@ -103,78 +111,7 @@ export default async function CrmLinePage({
             }
           />
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Opportunity</th>
-                  <th className="px-4 py-2 font-medium">Account</th>
-                  <th className="px-4 py-2 font-medium">Stage</th>
-                  <th className="px-4 py-2 font-medium">TCV</th>
-                  <th className="px-4 py-2 font-medium">Margin</th>
-                  {showCommission && (
-                    <th className="px-4 py-2 font-medium">Commission</th>
-                  )}
-                  <th className="px-4 py-2 font-medium">Term</th>
-                  <th className="px-4 py-2 font-medium">Billing</th>
-                  <th className="px-4 py-2 font-medium">Close</th>
-                  <th className="px-4 py-2 font-medium">Prob.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {opps.map((o) => (
-                  <tr key={o.id} className="border-t hover:bg-accent/40">
-                    <td className="px-4 py-2 font-medium">
-                      <Link href={`/crm/edit/${o.id}`} className="hover:underline">
-                        {o.name}
-                      </Link>
-                      <div className="text-xs text-muted-foreground">
-                        {o.owner.name ?? o.owner.email}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2">{o.accountName}</td>
-                    <td className="px-4 py-2">
-                      <span className={STAGE_STYLES[o.stage] ?? ""}>
-                        {STAGE_LABELS[o.stage]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 tabular-nums">
-                      {o.amount != null ? formatCurrency(Number(o.amount)) : "—"}
-                      {o.monthlyAmount != null && (
-                        <div className="text-xs text-muted-foreground">
-                          {formatCurrency(Number(o.monthlyAmount))}/mo
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 tabular-nums">
-                      {o.marginPercentage != null
-                        ? `${Number(o.marginPercentage).toFixed(1)}%`
-                        : "—"}
-                    </td>
-                    {showCommission && (
-                      <td className="px-4 py-2 tabular-nums">
-                        {o.commissionAmount != null
-                          ? formatCurrency(Number(o.commissionAmount))
-                          : "—"}
-                      </td>
-                    )}
-                    <td className="px-4 py-2 tabular-nums">
-                      {o.termYears} yr{o.termYears > 1 ? "s" : ""}
-                    </td>
-                    <td className="px-4 py-2">
-                      {BILLING_FREQUENCY_LABELS[o.billingFrequency]}
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      {formatDate(o.closeDate)}
-                    </td>
-                    <td className="px-4 py-2 tabular-nums">
-                      {isOpenStage(o.stage) ? `${o.probability}%` : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <OpportunitiesTable rows={rows} />
         )}
       </div>
     </div>
