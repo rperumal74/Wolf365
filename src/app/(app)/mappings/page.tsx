@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { formatCurrency } from "@/lib/utils";
 import {
   autoMatchClientsAction,
   autoMatchSkusAction,
@@ -68,6 +69,25 @@ export default async function MappingsPage() {
         distinct: ["productSku"],
       })
     ).map((s) => [s.productSku, s.productName]),
+  );
+  // The QuickBooks item each mapping points at, so reviewers see both sides.
+  const itemIds = productMappings
+    .map((m) => m.qboItemId)
+    .filter((v): v is string => !!v);
+  const qboItems = new Map(
+    (
+      await prisma.qboItem.findMany({
+        where: { qboId: { in: itemIds } },
+        select: {
+          qboId: true,
+          name: true,
+          fullyQualifiedName: true,
+          type: true,
+          unitPrice: true,
+          active: true,
+        },
+      })
+    ).map((i) => [i.qboId, i]),
   );
 
   const linkCounts = {
@@ -233,43 +253,85 @@ export default async function MappingsPage() {
               description="Run auto-match after syncing TD SYNNEX subscriptions and QuickBooks items."
             />
           ) : (
+            <>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Maps a TD SYNNEX product (what you buy) to the QuickBooks item it
+              gets billed under (what appears on the customer&apos;s invoice).
+            </p>
             <div className="space-y-2">
-              {productMappings.map((m) => (
-                <Card key={m.id} className="flex items-center justify-between">
-                  <div className="text-sm">
-                    <p className="font-medium">
-                      {skuNames.get(m.tdSynnexSku) ?? m.tdSynnexSku}
-                    </p>
-                    <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                      {m.tdSynnexSku}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Bill under QuickBooks item:{" "}
-                      <span className="font-medium text-foreground">
-                        {m.qboItemName ?? m.qboItemId ?? "Unmapped"}
-                      </span>{" "}
-                      · Confidence <ConfidenceBadge value={m.confidence} /> · {m.status}
-                    </p>
-                  </div>
-                  {canApprove && m.status === "PROPOSED" && (
-                    <div className="flex gap-2">
-                      <form action={confirmSkuAction}>
-                        <input type="hidden" name="sku" value={m.tdSynnexSku} />
-                        <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90">
-                          Confirm
-                        </button>
-                      </form>
-                      <form action={rejectSkuAction}>
-                        <input type="hidden" name="sku" value={m.tdSynnexSku} />
-                        <button className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent">
-                          Reject
-                        </button>
-                      </form>
+              {productMappings.map((m) => {
+                const item = m.qboItemId ? qboItems.get(m.qboItemId) : undefined;
+                return (
+                  <Card key={m.id} className="flex items-center justify-between gap-4">
+                    <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                      {/* TD SYNNEX side */}
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          TD SYNNEX product
+                        </p>
+                        <p className="text-sm font-medium">
+                          {skuNames.get(m.tdSynnexSku) ?? m.tdSynnexSku}
+                        </p>
+                        <p className="font-mono text-xs text-muted-foreground">
+                          {m.tdSynnexSku}
+                        </p>
+                      </div>
+
+                      <span className="hidden text-muted-foreground sm:block">→</span>
+
+                      {/* QuickBooks side */}
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          QuickBooks item
+                        </p>
+                        <p className="text-sm font-medium">
+                          {item?.fullyQualifiedName ??
+                            item?.name ??
+                            m.qboItemName ??
+                            "Unmapped"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {item ? (
+                            <>
+                              {item.type ?? "Item"}
+                              {item.unitPrice != null && (
+                                <> · {formatCurrency(Number(item.unitPrice))}</>
+                              )}
+                              {item.active === false && <> · inactive</>}
+                            </>
+                          ) : (
+                            "Item details not synced"
+                          )}
+                        </p>
+                      </div>
                     </div>
-                  )}
-                </Card>
-              ))}
+
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Confidence <ConfidenceBadge value={m.confidence} /> · {m.status}
+                      </span>
+                      {canApprove && m.status === "PROPOSED" && (
+                        <div className="flex gap-2">
+                          <form action={confirmSkuAction}>
+                            <input type="hidden" name="sku" value={m.tdSynnexSku} />
+                            <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90">
+                              Confirm
+                            </button>
+                          </form>
+                          <form action={rejectSkuAction}>
+                            <input type="hidden" name="sku" value={m.tdSynnexSku} />
+                            <button className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent">
+                              Reject
+                            </button>
+                          </form>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
+            </>
           )}
         </section>
       </div>
