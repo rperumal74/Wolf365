@@ -124,6 +124,23 @@ function emailDomain(email: string | null | undefined): string | null {
   return d ?? null;
 }
 
+/** A value that looks like a bare domain (e.g. "acme.com"), not a company name. */
+function looksLikeDomain(s: string | null | undefined): boolean {
+  return !!s && !s.includes(" ") && /\.[a-z]{2,}$/i.test(s.trim());
+}
+
+/** Registrable label of a domain, for name comparison ("buhlerindustries.com"
+ *  → "buhlerindustries", "mail.acme.co.uk" → "acme"). */
+function domainToName(domain: string): string {
+  const parts = domain.toLowerCase().split(".").filter(Boolean);
+  if (parts.length < 2) return domain;
+  let idx = parts.length - 2;
+  if (parts.length >= 3 && ["co", "com", "org", "net", "gov", "ac", "edu"].includes(parts[idx] ?? "")) {
+    idx = parts.length - 3;
+  }
+  return parts[idx] ?? domain;
+}
+
 /**
  * (Re)build client-match proposals between QuickBooks and TD SYNNEX customers
  * that are not yet cross-linked — a customer qualifies when it has no client
@@ -147,15 +164,21 @@ export async function proposeClientMatches(actor: {
   const qbo = qboAll.filter((c) => !c.client || !c.client.tdSynnexCustomer);
   const td = tdAll.filter((c) => !c.client || !c.client.qboCustomer);
 
-  const sources: Candidate[] = qbo.map((c) => ({
-    id: c.id,
-    name: c.companyName ?? c.displayName,
-    domain: emailDomain(c.billingEmail),
-  }));
+  // TD SYNNEX customer names are often domains (e.g. "buhlerindustries.com").
+  // Derive a comparable company-ish name from the domain so it lines up with
+  // QuickBooks company names, and keep the full domain as a matching signal.
+  const sources: Candidate[] = qbo.map((c) => {
+    const raw = c.companyName ?? c.displayName;
+    return {
+      id: c.id,
+      name: looksLikeDomain(raw) ? domainToName(raw) : raw,
+      domain: emailDomain(c.billingEmail) ?? (looksLikeDomain(raw) ? raw : null),
+    };
+  });
   const targets: Candidate[] = td.map((c) => ({
     id: c.id,
-    name: c.name,
-    domain: c.domain,
+    name: looksLikeDomain(c.name) ? domainToName(c.name) : c.name,
+    domain: c.domain ?? (looksLikeDomain(c.name) ? c.name : null),
   }));
 
   const proposals = proposeMatches(sources, targets);

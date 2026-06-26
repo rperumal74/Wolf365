@@ -41,26 +41,46 @@ export interface MatchScore {
   exact: boolean;
 }
 
+/** Normalized name with spaces removed — lets "Buhler Industries" line up with
+ *  a domain-derived "buhlerindustries". */
+function collapse(name: string): string {
+  return normalizeName(name).replace(/ /g, "");
+}
+
 export function scoreMatch(signals: MatchSignals): MatchScore {
   const normA = normalizeName(signals.nameA);
   const normB = normalizeName(signals.nameB);
 
+  // Only a true normalized-name match auto-confirms (no human review).
   if (normA && normA === normB) {
     return { confidence: 1, exact: true };
   }
 
   const nameSim = jaccard(tokenSet(signals.nameA), tokenSet(signals.nameB));
 
-  // Domain match is a strong corroborating signal.
+  // Space-collapsed equality / containment (e.g. "buhler industries" vs a
+  // domain-derived "buhlerindustries") — strong, but surfaced for review rather
+  // than auto-merged.
+  const cA = collapse(signals.nameA);
+  const cB = collapse(signals.nameB);
+  const collapsedEqual = cA.length >= 4 && cA === cB;
+  const contained =
+    cA.length >= 5 && cB.length >= 5 && (cA.includes(cB) || cB.includes(cA));
+
+  // Shared domain is a strong corroborating signal on its own.
   const domainMatch =
     !!signals.domainA &&
     !!signals.domainB &&
     signals.domainA.toLowerCase() === signals.domainB.toLowerCase();
 
-  // Weighted blend, capped below 1.0 so only exact matches reach full
-  // confidence (and thus auto-confirm).
-  let confidence = nameSim * 0.85 + (domainMatch ? 0.3 : 0);
-  confidence = Math.min(0.99, Math.round(confidence * 100) / 100);
+  let base = nameSim * 0.85;
+  if (collapsedEqual) base = Math.max(base, 0.95);
+  else if (contained) base = Math.max(base, 0.7);
+
+  // Capped below 1.0 so only exact normalized-name matches auto-confirm;
+  // everything else stays reviewable.
+  let confidence = Math.min(0.99, base + (domainMatch ? 0.5 : 0));
+  confidence = Math.round(confidence * 100) / 100;
 
   return { confidence, exact: false };
 }
