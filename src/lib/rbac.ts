@@ -27,7 +27,8 @@ export type Permission =
   | "reports:export"
   | "audit:read"
   | "crm:read"
-  | "crm:write";
+  | "crm:write"
+  | "backups:manage";
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Administrator — full control over everything.
@@ -51,6 +52,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "audit:read",
     "crm:read",
     "crm:write",
+    "backups:manage",
   ],
   // Power User — can operate the whole billing pipeline and run syncs / test
   // connections, but CANNOT change connector credentials or other admin-only

@@ -50,6 +50,14 @@ const serverSchema = z.object({
   // Debug-log retention in days (30–90 typical).
   WOLF365_DEBUG_LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
+  // Neon control-plane API access for database backups (branch snapshots).
+  // Both must be set for in-app/scheduled Neon backups; if either is missing
+  // the backup UI shows "not configured" and only the JSON export works.
+  NEON_API_KEY: z.string().optional(),
+  NEON_PROJECT_ID: z.string().optional(),
+  // How long to keep Neon backup branches before they're pruned.
+  BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),

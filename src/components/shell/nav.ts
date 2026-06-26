@@ -29,5 +29,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Audit Log", href: "/admin/audit", icon: "ScrollText", section: "Administration", permission: "audit:read" },
   { label: "Users", href: "/admin/users", icon: "Users", section: "Administration", permission: "users:manage" },
   { label: "Security & SSO", href: "/admin/security", icon: "ShieldCheck", section: "Administration", permission: "sso:configure" },
+  { label: "Backups", href: "/admin/backup", icon: "DatabaseBackup", section: "Administration", permission: "backups:manage" },
   { label: "Settings", href: "/settings", icon: "Settings", section: "Account" },
 ];

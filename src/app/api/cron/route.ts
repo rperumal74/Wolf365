@@ -6,6 +6,7 @@ import { runSync } from "@/connectors/runtime";
 import { purgeOldDebugLogs } from "@/lib/debug-log";
 import { safeErrorMessage } from "@/lib/redact";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { runNeonBackup, pruneExpiredBackups } from "@/lib/backup/service";
 
 // Cron jobs may run longer than the default; allow up to 5 minutes.
 export const maxDuration = 300;
@@ -67,10 +68,27 @@ export async function GET(request: Request) {
 
   const purged = await purgeOldDebugLogs(env.WOLF365_DEBUG_LOG_RETENTION_DAYS);
 
+  // Daily database backup (Neon branch snapshot) + retention pruning.
+  // Best-effort: a backup failure must not fail the whole cron.
+  let backup: unknown;
+  try {
+    const now = new Date();
+    const result = await runNeonBackup({
+      trigger: "CRON",
+      actor: { id: null, email: "cron" },
+      now,
+    });
+    const pruned = await pruneExpiredBackups(now);
+    backup = { ...result, pruned };
+  } catch (err) {
+    backup = { ok: false, error: safeErrorMessage(err) };
+  }
+
   return NextResponse.json({
     ok: true,
     synced: results,
     reconciled,
     debugLogsPurged: purged,
+    backup,
   });
 }

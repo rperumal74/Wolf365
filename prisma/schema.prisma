@@ -50,6 +50,7 @@ model User {
   auditLogs AuditLog[]
   ownedOpportunities   CrmOpportunity[] @relation("OpportunityOwner")
   createdOpportunities CrmOpportunity[] @relation("OpportunityCreator")
+  createdBackups       Backup[]         @relation("BackupCreator")
 
   @@index([role])
 }
@@ -252,6 +253,8 @@ enum AuditAction {
   OPPORTUNITY_CREATED
   OPPORTUNITY_UPDATED
   OPPORTUNITY_DELETED
+  BACKUP_CREATED
+  BACKUP_DELETED
 }
 
 model AuditLog {
@@ -783,4 +786,28 @@ model CrmOpportunity {
   @@index([ownerId])
   @@index([closeDate])
   @@index([clientId])
+}
+
+// ---------------------------------------------------------------------------
+// Backups — records of platform backups. A NEON_BRANCH backup is a Neon API
+// branch (an instant point-in-time snapshot of the whole database); a
+// LOGICAL_EXPORT is a sanitized JSON dump downloaded by an admin. String
+// columns (kind/trigger/status) keep the migration simple; allowed values are
+// documented inline.
+model Backup {
+  id           String    @id @default(cuid())
+  kind         String // "NEON_BRANCH" | "LOGICAL_EXPORT"
+  trigger      String // "MANUAL" | "CRON"
+  status       String    @default("PENDING") // "PENDING" | "SUCCESS" | "FAILED"
+  neonBranchId String? // Neon branch id when kind = NEON_BRANCH
+  branchName   String? // human-readable snapshot name
+  sizeBytes    BigInt? // logical export size, if applicable
+  error        String?
+  expiresAt    DateTime? // retention horizon; pruned past this
+  createdById  String?
+  createdBy    User?     @relation("BackupCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  finishedAt   DateTime?
+
+  @@index([createdAt])
 }

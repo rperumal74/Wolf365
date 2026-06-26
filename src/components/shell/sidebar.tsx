@@ -20,6 +20,7 @@ import {
   Wrench,
   Network,
   Cloud,
+  DatabaseBackup,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,7 @@ const ICONS: Record<string, LucideIcon> = {
   Wrench,
   Network,
   Cloud,
+  DatabaseBackup,
 };
 
 const SECTION_ORDER = [
