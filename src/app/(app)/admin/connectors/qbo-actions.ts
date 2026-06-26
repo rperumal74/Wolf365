@@ -54,10 +54,12 @@ export async function cleanupSandboxDataAction(
           itemsDeleted: result.itemsDeleted,
           clientsDeleted: result.clientsDeleted,
           clientsKept: result.clientsKept,
+          proposalsDeleted: result.proposalsDeleted,
         },
       });
       revalidatePath(CONNECTOR_PAGE);
       revalidatePath("/clients");
+      revalidatePath("/mappings");
     }
     return { ok: result.ok, message: result.message };
   } catch (err) {

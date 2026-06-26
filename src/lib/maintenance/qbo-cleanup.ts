@@ -21,6 +21,7 @@ export interface QboCleanupResult {
   itemsDeleted: number;
   clientsDeleted: number;
   clientsKept: number;
+  proposalsDeleted: number;
 }
 
 /** Read the connected PRODUCTION company's realm id from connector secrets. */
@@ -55,6 +56,7 @@ export async function purgeNonProductionQboData(): Promise<QboCleanupResult> {
       itemsDeleted: 0,
       clientsDeleted: 0,
       clientsKept: 0,
+      proposalsDeleted: 0,
     };
   }
 
@@ -109,7 +111,32 @@ export async function purgeNonProductionQboData(): Promise<QboCleanupResult> {
       });
       clientsDeleted = clients.count;
     }
-    return { customersDeleted: customers.count, itemsDeleted: items.count, clientsDeleted };
+
+    // Clear client-match proposals orphaned by the deletions above — i.e. those
+    // pointing at a QBO customer or TD SYNNEX customer that no longer exists.
+    const [remainingQbo, remainingTd] = await Promise.all([
+      tx.qboCustomer.findMany({ select: { id: true } }),
+      tx.tdSynnexCustomer.findMany({ select: { id: true } }),
+    ]);
+    // notIn:[] matches everything in Prisma; a sentinel keeps that behavior
+    // explicit (when none remain, every proposal is orphaned → delete all).
+    const qboIds = remainingQbo.map((r) => r.id);
+    const tdIds = remainingTd.map((r) => r.id);
+    const proposals = await tx.clientMatchProposal.deleteMany({
+      where: {
+        OR: [
+          { qboCustomerId: { notIn: qboIds.length ? qboIds : ["__none__"] } },
+          { tdSynnexCustomerId: { notIn: tdIds.length ? tdIds : ["__none__"] } },
+        ],
+      },
+    });
+
+    return {
+      customersDeleted: customers.count,
+      itemsDeleted: items.count,
+      clientsDeleted,
+      proposalsDeleted: proposals.count,
+    };
   });
 
   return {
@@ -119,9 +146,10 @@ export async function purgeNonProductionQboData(): Promise<QboCleanupResult> {
     itemsDeleted: result.itemsDeleted,
     clientsDeleted: result.clientsDeleted,
     clientsKept,
+    proposalsDeleted: result.proposalsDeleted,
     message:
       `Removed ${result.customersDeleted} sandbox customer(s), ${result.itemsDeleted} sandbox item(s), ` +
-      `and ${result.clientsDeleted} sandbox-only client(s).` +
+      `${result.clientsDeleted} sandbox-only client(s), and ${result.proposalsDeleted} stale match proposal(s).` +
       (clientsKept
         ? ` Kept ${clientsKept} client(s) that had billing/CRM or another data source.`
         : ""),
