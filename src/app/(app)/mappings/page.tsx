@@ -1,4 +1,5 @@
-import { GitMerge } from "lucide-react";
+import Link from "next/link";
+import { GitMerge, ExternalLink } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -32,7 +33,7 @@ export default async function MappingsPage() {
   const canApprove = can(user.role, "mappings:approve");
   const canPropose = can(user.role, "mappings:propose");
 
-  const [clientProposals, productMappings] = await Promise.all([
+  const [clientProposals, productMappings, links] = await Promise.all([
     prisma.clientMatchProposal.findMany({
       where: { status: "PROPOSED" },
       orderBy: { confidence: "desc" },
@@ -42,7 +43,26 @@ export default async function MappingsPage() {
       orderBy: [{ status: "asc" }, { confidence: "desc" }],
       take: 300,
     }),
+    // Every client with its cross-system links, for the full linkages view.
+    prisma.client.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        qboCustomer: { select: { displayName: true, companyName: true } },
+        tdSynnexCustomer: {
+          select: { name: true, _count: { select: { subscriptions: true } } },
+        },
+      },
+    }),
   ]);
+
+  const linkCounts = {
+    total: links.length,
+    both: links.filter((l) => l.qboCustomer && l.tdSynnexCustomer).length,
+    qboOnly: links.filter((l) => l.qboCustomer && !l.tdSynnexCustomer).length,
+    tdOnly: links.filter((l) => !l.qboCustomer && l.tdSynnexCustomer).length,
+  };
 
   // Resolve names for the client proposals in one round-trip each side.
   const qboIds = clientProposals.map((p) => p.qboCustomerId);
@@ -63,6 +83,82 @@ export default async function MappingsPage() {
         description="AI-assisted client and SKU mapping. Exact matches auto-confirm; uncertain ones need review."
       />
       <div className="space-y-8 p-8">
+        {/* Full customer linkages — every client and its QBO ↔ TD SYNNEX links */}
+        <section>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">
+              Customer linkages ({linkCounts.total})
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {linkCounts.both} linked both · {linkCounts.qboOnly} QuickBooks only ·{" "}
+              {linkCounts.tdOnly} TD SYNNEX only
+            </p>
+          </div>
+          {links.length === 0 ? (
+            <EmptyState
+              icon={<GitMerge className="h-8 w-8" />}
+              title="No customer linkages yet"
+              description="Run auto-match after syncing QuickBooks and TD SYNNEX to create clients and link them across systems."
+            />
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">Client</th>
+                    <th className="px-4 py-2 font-medium">QuickBooks</th>
+                    <th className="px-4 py-2 font-medium">TD SYNNEX</th>
+                    <th className="px-4 py-2 font-medium">M365 subs</th>
+                    <th className="px-4 py-2 font-medium">Link status</th>
+                    <th className="px-4 py-2 font-medium text-right">Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {links.map((l) => {
+                    const qboName =
+                      l.qboCustomer?.companyName ?? l.qboCustomer?.displayName ?? null;
+                    const tdName = l.tdSynnexCustomer?.name ?? null;
+                    const status = qboName && tdName ? "Linked" : qboName ? "QBO only" : "TD only";
+                    const tone =
+                      status === "Linked"
+                        ? "bg-success/15 text-success"
+                        : "bg-warning/15 text-warning";
+                    return (
+                      <tr key={l.id} className="border-t hover:bg-accent/40">
+                        <td className="px-4 py-2 font-medium">
+                          <Link href={`/clients/${l.id}`} className="hover:underline">
+                            {l.name}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-2">{qboName ?? <span className="text-muted-foreground">—</span>}</td>
+                        <td className="px-4 py-2">{tdName ?? <span className="text-muted-foreground">—</span>}</td>
+                        <td className="px-4 py-2 tabular-nums">
+                          {l.tdSynnexCustomer?._count.subscriptions ?? 0}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}
+                          >
+                            {status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <Link
+                            href={`/clients/${l.id}`}
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            View <ExternalLink className="h-3.5 w-3.5" />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         {/* Client mapping */}
         <section>
           <div className="mb-3 flex items-center justify-between">
