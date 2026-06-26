@@ -1,7 +1,14 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { signIn } from "@/auth";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveSso } from "@/lib/auth/sso";
+
+// Keep the sign-in page generic — the tab title must not identify the app.
+export const metadata: Metadata = {
+  title: "Sign in",
+  description: "Sign in",
+};
 
 /**
  * Sign-in page. Offers Microsoft Entra ID SSO when configured. When SSO is not
@@ -26,18 +33,8 @@ export default async function SignInPage({
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-muted px-4 py-8">
-      {/* Brand hero — sized to keep the sign-in button above the fold */}
-      <div className="flex flex-col items-center text-center">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/Wolf365 Logo.png"
-          alt="Wolf365"
-          className="h-auto w-full max-w-md max-h-[40vh] object-contain"
-        />
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-          Microsoft 365 Billing Application
-        </h1>
-      </div>
+      {/* Intentionally generic — no branding that identifies the application. */}
+      <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
 
       <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-sm">
         {error && (
