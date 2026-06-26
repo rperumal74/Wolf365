@@ -9,6 +9,7 @@ import {
   confirmClientMatch,
   rejectClientMatch,
   setProductMappingStatus,
+  setProductMappingItem,
   materializeClients,
 } from "@/lib/mapping/service";
 
@@ -89,5 +90,14 @@ export async function rejectSkuAction(formData: FormData): Promise<void> {
     id: user.id,
     email: user.email,
   });
+  revalidatePath("/mappings");
+}
+
+export async function mapSkuToItemAction(formData: FormData): Promise<void> {
+  const user = await requirePermission("mappings:approve");
+  const sku = String(formData.get("sku"));
+  const qboItemId = String(formData.get("qboItemId"));
+  if (!sku || !qboItemId) return;
+  await setProductMappingItem(sku, qboItemId, { id: user.id, email: user.email });
   revalidatePath("/mappings");
 }

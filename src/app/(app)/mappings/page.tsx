@@ -12,6 +12,7 @@ import {
   rejectClientAction,
   confirmSkuAction,
   rejectSkuAction,
+  mapSkuToItemAction,
 } from "./actions";
 import { AutoMatchButton } from "./auto-match-button";
 
@@ -89,6 +90,13 @@ export default async function MappingsPage() {
       })
     ).map((i) => [i.qboId, i]),
   );
+  // Active QBO items, for the manual "map to a specific item" picker.
+  const qboItemOptions = await prisma.qboItem.findMany({
+    where: { active: true },
+    orderBy: { name: "asc" },
+    select: { qboId: true, name: true, fullyQualifiedName: true, type: true },
+    take: 1000,
+  });
 
   const linkCounts = {
     total: links.length,
@@ -325,6 +333,32 @@ export default async function MappingsPage() {
                             </button>
                           </form>
                         </div>
+                      )}
+                      {canApprove && (
+                        <form
+                          action={mapSkuToItemAction}
+                          className="flex items-center gap-1.5"
+                        >
+                          <input type="hidden" name="sku" value={m.tdSynnexSku} />
+                          <select
+                            name="qboItemId"
+                            defaultValue={m.qboItemId ?? ""}
+                            className="max-w-[16rem] rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                          >
+                            <option value="" disabled>
+                              Choose QuickBooks item…
+                            </option>
+                            {qboItemOptions.map((o) => (
+                              <option key={o.qboId} value={o.qboId}>
+                                {o.fullyQualifiedName ?? o.name}
+                                {o.type ? ` (${o.type})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <button className="rounded-md border px-2.5 py-1 text-xs font-medium transition hover:bg-accent">
+                            Map
+                          </button>
+                        </form>
                       )}
                     </div>
                   </Card>

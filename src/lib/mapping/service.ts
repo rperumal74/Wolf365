@@ -401,6 +401,46 @@ export async function proposeSkuMatches(actor: {
   return { proposed, autoConfirmed };
 }
 
+/** Manually map a SKU to a specific QuickBooks item and confirm it. */
+export async function setProductMappingItem(
+  sku: string,
+  qboItemId: string,
+  actor: { id: string; email: string },
+): Promise<void> {
+  const item = await prisma.qboItem.findUnique({
+    where: { qboId: qboItemId },
+    select: { name: true },
+  });
+  await prisma.productMapping.upsert({
+    where: { tdSynnexSku: sku },
+    create: {
+      tdSynnexSku: sku,
+      qboItemId,
+      qboItemName: item?.name ?? null,
+      confidence: 1,
+      method: "MANUAL",
+      status: "CONFIRMED",
+      reviewedById: actor.id,
+      reviewedAt: new Date(),
+    },
+    update: {
+      qboItemId,
+      qboItemName: item?.name ?? null,
+      method: "MANUAL",
+      status: "CONFIRMED",
+      reviewedById: actor.id,
+      reviewedAt: new Date(),
+    },
+  });
+  await audit({
+    action: "MAPPING_CHANGED",
+    actorId: actor.id,
+    actorEmail: actor.email,
+    target: `skuMatch:${sku}`,
+    metadata: { decision: "manual-map", qboItemId },
+  });
+}
+
 export async function setProductMappingStatus(
   sku: string,
   status: "CONFIRMED" | "REJECTED",
