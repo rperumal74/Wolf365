@@ -36,6 +36,29 @@ export default async function BillingRunDetailPage({
   if (!run) notFound();
 
   const qbo = run.client?.qboCustomer;
+
+  // When a run has no lines, explain why: no linked M365 subscriptions, or
+  // subscriptions that were all skipped (e.g. unmapped SKUs).
+  const subCount =
+    run.lines.length === 0 && run.clientId
+      ? await prisma.tdSynnexSubscription.count({
+          where: { customer: { clientId: run.clientId } },
+        })
+      : 0;
+  const skipReasons =
+    run.lines.length === 0 && run.clientId
+      ? await prisma.exception.findMany({
+          where: {
+            clientId: run.clientId,
+            type: { in: ["UNMAPPED_SKU", "MISSING_PRICE"] },
+            status: { not: "RESOLVED" },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: { id: true, message: true },
+        })
+      : [];
+
   const grandTotal = run.lines.reduce((a, l) => a + Number(l.total), 0);
   const grandCost = run.lines.reduce(
     (a, l) => a + (l.estimatedCost != null ? Number(l.estimatedCost) : 0),
@@ -145,10 +168,41 @@ export default async function BillingRunDetailPage({
             </table>
           </div>
           {run.lines.length === 0 && (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No billable lines were generated. Check mappings, prices, and the
-              exception queue.
-            </p>
+            <div className="space-y-2 py-6 text-sm">
+              <p className="font-medium">No billable lines were generated.</p>
+              {subCount === 0 ? (
+                <p className="text-muted-foreground">
+                  This client has <strong>no linked TD SYNNEX (Microsoft 365)
+                  subscriptions</strong>, so there is nothing for this run to bill.
+                  Billing runs only bill TD SYNNEX licensing — if this client should
+                  have M365 licensing, link it to its TD SYNNEX customer in Mappings
+                  (or it may genuinely have no M365 with us).
+                </p>
+              ) : skipReasons.length > 0 ? (
+                <>
+                  <p className="text-muted-foreground">
+                    {subCount} subscription{subCount === 1 ? "" : "s"} found, but every
+                    line was skipped — usually because the SKU isn&apos;t mapped to a
+                    QuickBooks item. Confirm the mappings on the{" "}
+                    <Link href="/mappings" className="text-primary hover:underline">
+                      Mappings
+                    </Link>{" "}
+                    page, then regenerate this run:
+                  </p>
+                  <ul className="list-disc space-y-0.5 pl-5 text-muted-foreground">
+                    {skipReasons.map((e) => (
+                      <li key={e.id}>{e.message}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="text-muted-foreground">
+                  {subCount} subscription{subCount === 1 ? "" : "s"} found but none
+                  produced a billable line for this period — check the subscription
+                  active/renewal dates and proration, and the exception queue.
+                </p>
+              )}
+            </div>
           )}
           <p className="mt-4 text-xs text-muted-foreground">
             Estimated margin: {formatCurrency(margin)} (revenue {formatCurrency(grandTotal)} − est. cost {formatCurrency(grandCost)})
