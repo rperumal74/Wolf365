@@ -294,12 +294,19 @@ model Client {
   huduMatch        HuduCompany?
   superOpsMatch    SuperOpsClient?
 
+  // Manual client hierarchy: a subsidiary points at its parent. A client has at
+  // most one parent, so re-mapping a subsidiary moves it off its old parent.
+  parentClientId String?
+  parentClient   Client?  @relation("ClientHierarchy", fields: [parentClientId], references: [id], onDelete: SetNull)
+  subsidiaries   Client[] @relation("ClientHierarchy")
+
   billingRuns BillingRun[]
   exceptions  Exception[]
   superOpsInvoices SuperOpsInvoice[]
   crmOpportunities CrmOpportunity[]
 
   @@index([name])
+  @@index([parentClientId])
 }
 
 // QuickBooks Online customer snapshot.

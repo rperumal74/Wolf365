@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { SubsidiaryMapper } from "./subsidiary-mapper";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import {
@@ -35,7 +37,7 @@ export default async function ClientProfilePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requirePermission("clients:read");
+  const user = await requirePermission("clients:read");
   const { id } = await params;
 
   const client = await prisma.client.findUnique({
@@ -45,9 +47,20 @@ export default async function ClientProfilePage({
       tdSynnexCustomer: { include: { subscriptions: true } },
       huduMatch: true,
       superOpsMatch: true,
+      parentClient: { select: { id: true, name: true } },
+      subsidiaries: { select: { id: true, name: true }, orderBy: { name: "asc" } },
     },
   });
   if (!client) notFound();
+
+  const canMap = can(user.role, "mappings:approve");
+  // All clients for the subsidiary picker (only loaded when the user can map).
+  const allClients = canMap
+    ? await prisma.client.findMany({
+        select: { id: true, name: true, parentClientId: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
 
   const qbo = client.qboCustomer;
   const td = client.tdSynnexCustomer;
@@ -166,6 +179,58 @@ export default async function ClientProfilePage({
             )}
           </Card>
         </div>
+
+        {/* Client associations (parent / subsidiaries) */}
+        <Card>
+          <h2 className="text-sm font-semibold">Client associations</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Group related clients — e.g. subsidiaries under a parent company.
+          </p>
+
+          {client.parentClient && (
+            <p className="mt-3 text-sm">
+              Parent:{" "}
+              <Link
+                href={`/clients/${client.parentClient.id}`}
+                className="font-medium text-primary hover:underline"
+              >
+                {client.parentClient.name}
+              </Link>
+            </p>
+          )}
+
+          <div className="mt-2">
+            <p className="text-sm">
+              Subsidiaries: {client.subsidiaries.length === 0 && (
+                <span className="text-muted-foreground">none</span>
+              )}
+            </p>
+            {client.subsidiaries.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {client.subsidiaries.map((s) => (
+                  <Link
+                    key={s.id}
+                    href={`/clients/${s.id}`}
+                    className="rounded-full border px-2.5 py-0.5 text-xs hover:bg-accent"
+                  >
+                    {s.name}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {canMap && (
+            <div className="mt-4 border-t pt-4">
+              <SubsidiaryMapper
+                parentId={client.id}
+                parentName={client.name}
+                options={allClients}
+                initialSelectedIds={client.subsidiaries.map((s) => s.id)}
+              />
+            </div>
+          )}
+        </Card>
 
         {/* Per-client recurring totals from M365 licensing */}
         {recurring && recurring.activeCount > 0 && (
