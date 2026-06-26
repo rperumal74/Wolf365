@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { proposeMatches, type Candidate } from "@/lib/matching/similarity";
@@ -26,17 +27,22 @@ export async function materializeClients(actor: {
   let created = 0;
   let merged = 0;
   const tdClientByNorm = new Map<string, string>();
+  // Collected (source → clientId) links, applied in batched transactions at the
+  // end. We pre-generate client ids so creates and links can be batched without
+  // depending on per-row return values (hundreds of sequential round-trips here
+  // previously caused the action to time out).
+  const tdLinks: { id: string; clientId: string }[] = [];
+  const qboLinks: { id: string; clientId: string }[] = [];
+  const newClients: { id: string; name: string }[] = [];
 
   // 1) One Client per TD SYNNEX customer (first occurrence of a name owns it).
   for (const td of tds) {
-    const client = await prisma.client.create({ data: { name: td.name } });
-    await prisma.tdSynnexCustomer.update({
-      where: { id: td.id },
-      data: { clientId: client.id },
-    });
+    const clientId = randomUUID();
+    newClients.push({ id: clientId, name: td.name });
+    tdLinks.push({ id: td.id, clientId });
     created += 1;
     const norm = normalizeName(td.name);
-    if (norm && !tdClientByNorm.has(norm)) tdClientByNorm.set(norm, client.id);
+    if (norm && !tdClientByNorm.has(norm)) tdClientByNorm.set(norm, clientId);
   }
 
   // 2) Link each QBO customer to the matching TD-derived Client, else create one.
@@ -46,20 +52,40 @@ export async function materializeClients(actor: {
     const norm = normalizeName(name);
     const match = norm ? tdClientByNorm.get(norm) : undefined;
     if (match && !usedClient.has(match)) {
-      await prisma.qboCustomer.update({
-        where: { id: qbo.id },
-        data: { clientId: match },
-      });
+      qboLinks.push({ id: qbo.id, clientId: match });
       usedClient.add(match);
       merged += 1;
     } else {
-      const client = await prisma.client.create({ data: { name } });
-      await prisma.qboCustomer.update({
-        where: { id: qbo.id },
-        data: { clientId: client.id },
-      });
+      const clientId = randomUUID();
+      newClients.push({ id: clientId, name });
+      qboLinks.push({ id: qbo.id, clientId });
       created += 1;
     }
+  }
+
+  // Apply in a few batched round-trips instead of two per customer.
+  if (newClients.length) {
+    await prisma.client.createMany({ data: newClients });
+  }
+  if (tdLinks.length) {
+    await prisma.$transaction(
+      tdLinks.map((l) =>
+        prisma.tdSynnexCustomer.update({
+          where: { id: l.id },
+          data: { clientId: l.clientId },
+        }),
+      ),
+    );
+  }
+  if (qboLinks.length) {
+    await prisma.$transaction(
+      qboLinks.map((l) =>
+        prisma.qboCustomer.update({
+          where: { id: l.id },
+          data: { clientId: l.clientId },
+        }),
+      ),
+    );
   }
 
   const clients = await prisma.client.count();

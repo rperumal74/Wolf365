@@ -12,6 +12,10 @@ import {
   rejectSkuAction,
 } from "./actions";
 
+// The auto-match server actions materialize a Client per synced customer and
+// can touch hundreds of records; allow up to 5 minutes (capped lower on Hobby).
+export const maxDuration = 300;
+
 function ConfidenceBadge({ value }: { value: number | null }) {
   if (value == null) return <span className="text-muted-foreground">—</span>;
   const pct = Math.round(value * 100);
