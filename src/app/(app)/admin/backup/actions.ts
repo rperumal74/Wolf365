@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { safeErrorMessage } from "@/lib/redact";
 import { runNeonBackup, restoreFromBackup } from "@/lib/backup/service";
+import { checkNeonAccess } from "@/lib/backup/neon";
 
 export interface BackupActionResult {
   ok: boolean;
@@ -23,6 +24,20 @@ export async function triggerBackupAction(
       now: new Date(),
     });
     revalidatePath("/admin/backup");
+    return { ok: result.ok, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/** Read-only Neon connectivity check (GET-only; never restores or mutates). */
+export async function checkNeonAccessAction(
+  _prev: BackupActionResult | null,
+  _formData: FormData,
+): Promise<BackupActionResult> {
+  await requirePermission("backups:manage");
+  try {
+    const result = await checkNeonAccess();
     return { ok: result.ok, message: result.message };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

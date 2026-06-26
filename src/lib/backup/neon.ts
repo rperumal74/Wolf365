@@ -106,6 +106,72 @@ export async function deleteBranch(branchId: string): Promise<void> {
   if (!res.ok && res.status !== 404) throw new Error(await describeError(res));
 }
 
+export interface NeonAccessCheck {
+  ok: boolean;
+  configured: boolean;
+  branchCount: number;
+  targetBranchId?: string;
+  targetBranchName?: string;
+  message: string;
+}
+
+/**
+ * Read-only connectivity / setup check: confirms the API key authenticates,
+ * lists branches, and identifies the branch a restore would target. Makes only
+ * GET calls — never creates, deletes, or restores anything.
+ */
+export async function checkNeonAccess(): Promise<NeonAccessCheck> {
+  if (!isNeonConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      branchCount: 0,
+      message: "Neon backups are not configured (set NEON_API_KEY and NEON_PROJECT_ID).",
+    };
+  }
+  try {
+    const branches = await listBranches();
+    const override = getEnv().NEON_BRANCH_ID;
+    const target = override
+      ? branches.find((b) => b.id === override)
+      : branches.find((b) => b.default === true || b.primary === true);
+    const targetId = override ?? target?.id;
+
+    if (!targetId) {
+      return {
+        ok: false,
+        configured: true,
+        branchCount: branches.length,
+        message: `Connected (${branches.length} branch(es)) but could not identify the default branch — set NEON_BRANCH_ID.`,
+      };
+    }
+    if (override && !target) {
+      return {
+        ok: false,
+        configured: true,
+        branchCount: branches.length,
+        targetBranchId: targetId,
+        message: `Connected (${branches.length} branch(es)) but NEON_BRANCH_ID "${override}" was not found in this project.`,
+      };
+    }
+    return {
+      ok: true,
+      configured: true,
+      branchCount: branches.length,
+      targetBranchId: targetId,
+      targetBranchName: target?.name,
+      message: `Connected. ${branches.length} branch(es) found; restore target: ${target?.name ?? targetId}.`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      configured: true,
+      branchCount: 0,
+      message: `Neon API error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 /**
  * Resolve the production branch id to restore INTO. Uses NEON_BRANCH_ID when
  * set, otherwise the project's default (a.k.a. primary) branch.
