@@ -61,6 +61,10 @@ const serverSchema = z.object({
   // How long to keep Neon backup branches before they're pruned.
   BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
+  // Where in-app "Contact support" links point. An email address (rendered as a
+  // mailto:) or an http(s) support URL. Defaults to the shared support inbox.
+  WOLF365_SUPPORT_CONTACT: z.string().default("rperumal@wolfstrata.com"),
+
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
