@@ -14,6 +14,10 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/", icon: "LayoutDashboard", section: "Workspace" },
   { label: "Clients", href: "/clients", icon: "Building2", section: "Workspace", permission: "clients:read" },
+  { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Workspace", permission: "clients:read" },
+  { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Workspace", permission: "clients:read" },
+  { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Workspace", permission: "clients:read" },
+  { label: "Hudu Clients", href: "/synced/hudu", icon: "Building", section: "Workspace", permission: "clients:read" },
   { label: "Billing Runs", href: "/billing", icon: "Receipt", section: "Workspace", permission: "billing:read" },
   { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },

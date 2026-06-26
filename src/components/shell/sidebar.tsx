@@ -21,6 +21,10 @@ import {
   Network,
   Cloud,
   DatabaseBackup,
+  Boxes,
+  BookText,
+  Headset,
+  Building,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -45,6 +49,10 @@ const ICONS: Record<string, LucideIcon> = {
   Network,
   Cloud,
   DatabaseBackup,
+  Boxes,
+  BookText,
+  Headset,
+  Building,
 };
 
 const SECTION_ORDER = [
