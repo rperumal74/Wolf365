@@ -12,6 +12,7 @@ import {
   confirmSkuAction,
   rejectSkuAction,
 } from "./actions";
+import { AutoMatchButton } from "./auto-match-button";
 
 // The auto-match server actions materialize a Client per synced customer and
 // can touch hundreds of records; allow up to 5 minutes (capped lower on Hobby).
@@ -163,13 +164,7 @@ export default async function MappingsPage() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">Client matches awaiting review</h2>
-            {canPropose && (
-              <form action={autoMatchClientsAction}>
-                <button className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent">
-                  Run auto-match
-                </button>
-              </form>
-            )}
+            {canPropose && <AutoMatchButton action={autoMatchClientsAction} />}
           </div>
           {clientProposals.length === 0 ? (
             <EmptyState
@@ -217,13 +212,7 @@ export default async function MappingsPage() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">SKU → QuickBooks item mappings</h2>
-            {canPropose && (
-              <form action={autoMatchSkusAction}>
-                <button className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent">
-                  Run auto-match
-                </button>
-              </form>
-            )}
+            {canPropose && <AutoMatchButton action={autoMatchSkusAction} />}
           </div>
           {productMappings.length === 0 ? (
             <EmptyState

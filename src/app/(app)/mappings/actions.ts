@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
+import { safeErrorMessage } from "@/lib/redact";
 import {
   proposeClientMatches,
   proposeSkuMatches,
@@ -11,21 +12,48 @@ import {
   materializeClients,
 } from "@/lib/mapping/service";
 
-export async function autoMatchClientsAction(): Promise<void> {
-  const user = await requirePermission("mappings:propose");
-  // First match QBO↔TD: exact names merge automatically, fuzzy near-matches
-  // become proposals for review. THEN materialize a Client for every remaining
-  // customer (skipping those with a pending proposal, so they stay reviewable).
-  await proposeClientMatches({ id: user.id, email: user.email });
-  await materializeClients({ id: user.id, email: user.email });
-  revalidatePath("/mappings");
-  revalidatePath("/clients");
+export interface MappingActionResult {
+  ok: boolean;
+  message: string;
 }
 
-export async function autoMatchSkusAction(): Promise<void> {
+export async function autoMatchClientsAction(
+  _prev: MappingActionResult | null,
+  _formData: FormData,
+): Promise<MappingActionResult> {
   const user = await requirePermission("mappings:propose");
-  await proposeSkuMatches({ id: user.id, email: user.email });
-  revalidatePath("/mappings");
+  try {
+    // First match QBO↔TD: exact names merge automatically, fuzzy near-matches
+    // become proposals for review. THEN materialize a Client for every remaining
+    // customer (skipping those with a pending proposal, so they stay reviewable).
+    const match = await proposeClientMatches({ id: user.id, email: user.email });
+    const mat = await materializeClients({ id: user.id, email: user.email });
+    revalidatePath("/mappings");
+    revalidatePath("/clients");
+    return {
+      ok: true,
+      message: `${match.proposed} match(es) awaiting review · ${match.autoConfirmed} auto-linked · ${mat.created} new client(s) materialized.`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+export async function autoMatchSkusAction(
+  _prev: MappingActionResult | null,
+  _formData: FormData,
+): Promise<MappingActionResult> {
+  const user = await requirePermission("mappings:propose");
+  try {
+    const r = await proposeSkuMatches({ id: user.id, email: user.email });
+    revalidatePath("/mappings");
+    return {
+      ok: true,
+      message: `${r.proposed} SKU mapping(s) awaiting review · ${r.autoConfirmed} auto-linked.`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
 }
 
 export async function confirmClientAction(formData: FormData): Promise<void> {
